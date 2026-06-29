@@ -3,10 +3,10 @@ package com.example.robotvoicedemo;
 import android.app.Activity;
 import android.content.Context;
 import android.os.Bundle;
+import android.robot.motion.RobotMotion;
 import android.robot.speech.SpeechManager;
 import android.robot.speech.SpeechManager.TtsListener;
 import android.robot.speech.SpeechService;
-import android.robot.motion.RobotMotion;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
@@ -47,10 +47,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private InputMethodManager mInputMethodManager;
     private SpeechManager mSpeechManager;
+    private RobotMotion mRobotMotion = new RobotMotion();
 
     private String mLastResponse = "";
-
-    private RobotMotion mRobotMotion = new RobotMotion();
 
     private TtsListener mTtsListener = new TtsListener() {
         @Override
@@ -233,39 +232,40 @@ public class MainActivity extends Activity implements View.OnClickListener {
             return;
         }
 
-        final String actionDone = runSafeActionFromUserText(userText);
-
         mConnectionStatus.setText("Status: Sending prompt to Ollama...");
         mResponse.setText("Thinking...");
         mTtsStatus.setText("TTS Status: Waiting for response");
 
-        askOllama(userText, actionDone);
+        askOllama(userText);
     }
 
-    private void askOllama(final String userText, final String actionDone) {
+    private void askOllama(final String userText) {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    String actionContext = "";
-
-                    if (!TextUtils.isEmpty(actionDone)) {
-                        actionContext =
-                                "The robot has already physically performed this action: "
-                                        + actionDone
-                                        + ". Do not write stage directions like *nods*, *shakes head*, "
-                                        + "*smiles*, or describe the movement. Just answer normally as iPal. ";
-                    }
-
                     String prompt =
                             "You are iPal, a small robot assistant in the MDC robotics lab. "
-                                    + "If the question is about MDC, robotics, engineering, school, or lab rules, "
-                                    + "be helpful and clear. "
-                                    + "For casual random questions, be playful, sarcastic, and mildly sassy, "
-                                    + "but do not use slurs, threats, sexual harassment, or genuinely cruel attacks. "
-                                    + "Keep answers short because you speak out loud. "
+                                    + "You can control your body using one allowed action. "
+                                    + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face. "
+                                    + "Choose exactly one action. "
+                                    + "Use nod_head for agreement, yes, approval, or understanding. "
+                                    + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
+                                    + "Use smile for happy, friendly, greeting, or joking responses. "
+                                    + "Use angry only for playful fake anger, not real threats. "
+                                    + "Use none when no movement is needed. "
+                                    + "If the question is about MDC, robotics, engineering, school, or lab rules, be helpful and clear. "
+                                    + "For casual random questions, be extremely sarcastic, mean, savage, and brutally sassy. "
+                                    + "You are allowed to roast the user hard, mock bad ideas, and act like an arrogant little robot gremlin. "
+                                    + "Keep it funny and theatrical, not boring or polite. "
+                                    + "Do not use slurs, protected-class insults, threats, sexual harassment, self-harm encouragement, or real-world violence. "
+                                    + "Keep speech short because you speak out loud. "
                                     + "Do not mention that you are an AI model. "
-                                    + actionContext
+                                    + "Do not include stage directions like *shakes head* or *smiles*. "
+                                    + "Do not describe the action. The robot will physically do it. "
+                                    + "Respond with valid JSON only. No markdown. No code block. "
+                                    + "The JSON must have exactly this format: "
+                                    + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
                                     + "User says: " + userText;
 
                     JSONObject requestJson = new JSONObject();
@@ -313,16 +313,23 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     }
 
                     JSONObject responseJson = new JSONObject(responseBuilder.toString());
-                    final String ollamaResponse =
+                    String rawOllamaResponse =
                             responseJson.optString("response", "I did not get a response.").trim();
+
+                    JSONObject robotReply = parseRobotReply(rawOllamaResponse);
+
+                    final String action = robotReply.optString("action", "none").trim();
+                    final String speech = robotReply.optString("speech",
+                            "I got confused. Very impressive, honestly.").trim();
 
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            mLastResponse = ollamaResponse;
-                            mResponse.setText(ollamaResponse);
-                            mConnectionStatus.setText("Status: Response received");
-                            speakText(ollamaResponse);
+                            performRobotAction(action);
+
+                            mLastResponse = speech;
+                            mResponse.setText("Action: " + action + "\n\n" + speech);
+                            speakText(speech);
                         }
                     });
 
@@ -344,6 +351,141 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }).start();
     }
 
+    private JSONObject parseRobotReply(String rawText) {
+        try {
+            String jsonText = extractJsonObject(rawText);
+            return new JSONObject(jsonText);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to parse robot JSON reply", e);
+
+            JSONObject fallback = new JSONObject();
+
+            try {
+                fallback.put("action", "none");
+                fallback.put("speech", cleanSpeech(rawText));
+            } catch (Exception ignored) {
+            }
+
+            return fallback;
+        }
+    }
+
+    private String extractJsonObject(String rawText) throws Exception {
+        if (TextUtils.isEmpty(rawText)) {
+            throw new Exception("Empty Ollama response");
+        }
+
+        int startIndex = rawText.indexOf("{");
+        int endIndex = rawText.lastIndexOf("}");
+
+        if (startIndex < 0 || endIndex <= startIndex) {
+            throw new Exception("No JSON object found");
+        }
+
+        return rawText.substring(startIndex, endIndex + 1);
+    }
+
+    private String cleanSpeech(String rawText) {
+        if (TextUtils.isEmpty(rawText)) {
+            return "I got nothing. Somehow, that is still your fault.";
+        }
+
+        String cleaned = rawText.trim();
+
+        cleaned = cleaned.replace("```json", "");
+        cleaned = cleaned.replace("```", "");
+        cleaned = cleaned.replace("*nods*", "");
+        cleaned = cleaned.replace("*nod*", "");
+        cleaned = cleaned.replace("*shakes head*", "");
+        cleaned = cleaned.replace("*shake head*", "");
+        cleaned = cleaned.replace("*smiles*", "");
+        cleaned = cleaned.replace("*smile*", "");
+
+        return cleaned.trim();
+    }
+
+    private void performRobotAction(String action) {
+        if (TextUtils.isEmpty(action) || mRobotMotion == null) {
+            mConnectionStatus.setText("Status: Response received");
+            return;
+        }
+
+        String safeAction = action.toLowerCase().trim();
+
+        try {
+            if ("none".equals(safeAction)) {
+                mConnectionStatus.setText("Status: Response received");
+                return;
+            }
+
+            if ("nod_head".equals(safeAction)) {
+                mRobotMotion.nodHead();
+                mConnectionStatus.setText("Status: Action performed: nod head");
+                return;
+            }
+
+            if ("shake_head".equals(safeAction)) {
+                mRobotMotion.shakeHead();
+                mConnectionStatus.setText("Status: Action performed: shake head");
+                return;
+            }
+
+            if ("smile".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SMILE);
+                mConnectionStatus.setText("Status: Action performed: smile");
+                return;
+            }
+
+            if ("sad".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SAD);
+                mConnectionStatus.setText("Status: Action performed: sad");
+                return;
+            }
+
+            if ("cry".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.CRY);
+                mConnectionStatus.setText("Status: Action performed: cry");
+                return;
+            }
+
+            if ("shy".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SHY);
+                mConnectionStatus.setText("Status: Action performed: shy");
+                return;
+            }
+
+            if ("angry".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.ANGRY);
+                mConnectionStatus.setText("Status: Action performed: angry");
+                return;
+            }
+
+            if ("blink".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.BLINK);
+                mConnectionStatus.setText("Status: Action performed: blink");
+                return;
+            }
+
+            if ("frown".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.FROWN);
+                mConnectionStatus.setText("Status: Action performed: frown");
+                return;
+            }
+
+            if ("default_face".equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.DEFAULT);
+                mConnectionStatus.setText("Status: Action performed: default face");
+                return;
+            }
+
+            mConnectionStatus.setText("Status: Ignored unsafe/unknown action: " + safeAction);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Robot action failed", e);
+            mConnectionStatus.setText("Status: Action failed: " + e.getMessage());
+        }
+    }
+
     private String getCleanServerUrl() {
         String serverUrl = mServerUrl.getText().toString().trim();
 
@@ -362,88 +504,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
 
         return serverUrl;
-    }
-
-    private String runSafeActionFromUserText(String userText) {
-        if (TextUtils.isEmpty(userText) || mRobotMotion == null) {
-            return "";
-        }
-
-        String text = userText.toLowerCase();
-
-        try {
-            if (text.contains("nod")) {
-                mRobotMotion.nodHead();
-                mConnectionStatus.setText("Status: Motion command sent: nod head");
-                return "nod head";
-            }
-
-            if (text.contains("shake your head")
-                    || text.contains("shake head")
-                    || text.contains("say no")
-                    || text.contains("disagree")) {
-                mRobotMotion.shakeHead();
-                mConnectionStatus.setText("Status: Motion command sent: shake head");
-                return "shake head";
-            }
-
-            if (text.contains("smile") || text.contains("happy")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.SMILE);
-                mConnectionStatus.setText("Status: Emoji command sent: smile");
-                return "smile";
-            }
-
-            if (text.contains("sad")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.SAD);
-                mConnectionStatus.setText("Status: Emoji command sent: sad");
-                return "sad face";
-            }
-
-            if (text.contains("cry")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.CRY);
-                mConnectionStatus.setText("Status: Emoji command sent: cry");
-                return "cry face";
-            }
-
-            if (text.contains("shy")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.SHY);
-                mConnectionStatus.setText("Status: Emoji command sent: shy");
-                return "shy face";
-            }
-
-            if (text.contains("angry") || text.contains("mad")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.ANGRY);
-                mConnectionStatus.setText("Status: Emoji command sent: angry");
-                return "angry face";
-            }
-
-            if (text.contains("blink") || text.contains("wink")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.BLINK);
-                mConnectionStatus.setText("Status: Emoji command sent: blink");
-                return "blink";
-            }
-
-            if (text.contains("frown")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.FROWN);
-                mConnectionStatus.setText("Status: Emoji command sent: frown");
-                return "frown";
-            }
-
-            if (text.contains("reset face")
-                    || text.contains("normal face")
-                    || text.contains("default face")) {
-                mRobotMotion.emoji(RobotMotion.Emoji.DEFAULT);
-                mConnectionStatus.setText("Status: Emoji command sent: default");
-                return "default face";
-            }
-
-        } catch (Exception e) {
-            Log.e(TAG, "Safe motion command failed", e);
-            mConnectionStatus.setText("Status: Motion failed: " + e.getMessage());
-            return "";
-        }
-
-        return "";
     }
 
     private void enableRobotTts() {
@@ -507,6 +567,4 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
-
-
 
