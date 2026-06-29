@@ -3,6 +3,7 @@ package com.example.robotvoicedemo;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.robot.hw.RobotDevices;
 import android.os.Bundle;
 import android.robot.motion.RobotMotion;
 import android.robot.speech.SpeechManager;
@@ -243,10 +244,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mResponse.setText("Thinking...");
         mTtsStatus.setText("TTS Status: Waiting for response");
 
-        askOllama(userText);
+        final String requestServerUrl = getCleanServerUrl();
+
+        askOllama(userText, requestServerUrl);
     }
 
-    private void askOllama(final String userText) {
+    private void askOllama(final String userText, final String requestServerUrl) {
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -256,7 +259,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     boolean wasRepaired = false;
 
                     try {
-                        rawOllamaResponse = sendPromptToOllama(buildRobotPrompt(userText));
+                        rawOllamaResponse = sendPromptToOllama(buildRobotPrompt(userText), requestServerUrl);
                         robotReply = parseRobotReplyStrict(rawOllamaResponse);
 
                     } catch (Exception firstParseError) {
@@ -264,7 +267,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
                         try {
                             String repairedResponse =
-                                    sendPromptToOllama(buildJsonRepairPrompt(rawOllamaResponse));
+                                    sendPromptToOllama(buildJsonRepairPrompt(rawOllamaResponse), requestServerUrl);
 
                             robotReply = parseRobotReplyStrict(repairedResponse);
                             wasRepaired = true;
@@ -317,13 +320,15 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private String buildRobotPrompt(String userText) {
         return "You are iPal, a small robot assistant in the MDC robotics lab. "
                 + "You can control your body using one allowed action. "
-                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face. "
+                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave. "
                 + "Choose exactly one action. "
                 + "Use nod_head for agreement, yes, approval, or understanding. "
                 + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
                 + "Use smile for happy, friendly, greeting, or joking responses. "
                 + "Use angry only for playful fake anger, not real threats. "
                 + "Use none when no movement is needed. "
+                + "Use right_arm_small_wave when the user asks you to wave, greet with your arm, show off, or make a small arm gesture. "
+                + "Use reset_motors only when the user asks you to reset your motors, reset your body, return to normal, or stop holding a pose. "
                 + "If the question is about MDC, robotics, engineering, school, or lab rules, be helpful and clear. "
                 + "For casual random questions, be extremely sarcastic, mean, savage, and brutally sassy. "
                 + "You are allowed to roast the user hard, mock bad ideas, and act like an arrogant little robot gremlin. "
@@ -336,6 +341,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "Respond with valid JSON only. No markdown. No code block. "
                 + "The JSON must have exactly this format: "
                 + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
+                + "The speech field must never be empty. "
                 + "If you fail to return valid JSON, the app will reject your answer. "
                 + "User says: " + userText;
     }
@@ -346,19 +352,20 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "No markdown. No code block. No explanation. "
                 + "The JSON must have exactly this format: "
                 + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
-                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face. "
+                + "The speech field must never be empty. "
+                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave. "
                 + "If the action is unclear, use none. "
                 + "If the speech is unclear, create a short spoken version from the broken reply. "
                 + "Broken reply: " + badResponse;
     }
 
-    private String sendPromptToOllama(String prompt) throws Exception {
+    private String sendPromptToOllama(String prompt, String requestServerUrl) throws Exception {
         JSONObject requestJson = new JSONObject();
         requestJson.put("model", OLLAMA_MODEL);
         requestJson.put("prompt", prompt);
         requestJson.put("stream", false);
 
-        URL url = new URL(getCleanServerUrl() + "/api/generate");
+        URL url = new URL(requestServerUrl + "/api/generate");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
 
         connection.setRequestMethod("POST");
@@ -398,7 +405,15 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
 
         JSONObject responseJson = new JSONObject(responseBuilder.toString());
-        return responseJson.optString("response", "").trim();
+        String modelResponse = responseJson.optString("response", "").trim();
+
+        Log.i(TAG, "Raw Ollama model response: " + modelResponse);
+
+        if (TextUtils.isEmpty(modelResponse)) {
+            throw new Exception("Ollama returned an empty response field.");
+        }
+
+        return modelResponse;
     }
 
     private JSONObject parseRobotReplyStrict(String rawText) throws Exception {
@@ -412,12 +427,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
             throw new Exception("Robot JSON missing action");
         }
 
-        if (TextUtils.isEmpty(speech)) {
-            throw new Exception("Robot JSON missing speech");
-        }
-
         if (!isAllowedRobotAction(action)) {
             throw new Exception("Robot JSON used unknown action: " + action);
+        }
+
+        if (TextUtils.isEmpty(speech)) {
+            speech = getDefaultSpeechForAction(action);
         }
 
         JSONObject cleanReply = new JSONObject();
@@ -425,6 +440,36 @@ public class MainActivity extends Activity implements View.OnClickListener {
         cleanReply.put("speech", speech);
 
         return cleanReply;
+    }
+
+    private String getDefaultSpeechForAction(String action) {
+        if (TextUtils.isEmpty(action)) {
+            return "Done.";
+        }
+
+        String safeAction = action.toLowerCase().trim();
+
+        if ("reset_motors".equals(safeAction)) {
+            return "Done.";
+        }
+
+        if ("right_arm_small_wave".equals(safeAction)) {
+            return "Hello.";
+        }
+
+        if ("nod_head".equals(safeAction)) {
+            return "Yes.";
+        }
+
+        if ("shake_head".equals(safeAction)) {
+            return "No.";
+        }
+
+        if ("smile".equals(safeAction)) {
+            return "Hello.";
+        }
+
+        return "Done.";
     }
 
     private JSONObject buildFallbackRobotReply(String rawText) {
@@ -456,7 +501,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 || "angry".equals(safeAction)
                 || "blink".equals(safeAction)
                 || "frown".equals(safeAction)
-                || "default_face".equals(safeAction);
+                || "default_face".equals(safeAction)
+                || "reset_motors".equals(safeAction)
+                || "right_arm_small_wave".equals(safeAction);
     }
 
     private String extractJsonObject(String rawText) throws Exception {
@@ -567,12 +614,44 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 return;
             }
 
+            if ("reset_motors".equals(safeAction)) {
+                resetAllMotors();
+                mConnectionStatus.setText("Status: Action performed: reset motors");
+                return;
+            }
+
+            if ("right_arm_small_wave".equals(safeAction)) {
+                rightArmSmallWave();
+                mConnectionStatus.setText("Status: Action performed: right arm small wave");
+                return;
+            }
+
             mConnectionStatus.setText("Status: Ignored unsafe/unknown action: " + safeAction);
 
         } catch (Exception e) {
             Log.e(TAG, "Robot action failed", e);
             mConnectionStatus.setText("Status: Action failed: " + e.getMessage());
         }
+    }
+
+    private void resetAllMotors() {
+        if (mRobotMotion == null) {
+            return;
+        }
+
+        mRobotMotion.reset((int) RobotDevices.Units.ALL_MOTORS);
+    }
+
+    private void rightArmSmallWave() {
+        if (mRobotMotion == null) {
+            return;
+        }
+
+        // Safe preset only. Do not let the AI choose these raw angles yet.
+        // These values are intentionally small compared to the demo ranges.
+        mRobotMotion.startMotor((int) RobotDevices.Motors.ARM_SWING_RIGHT, 15, 1000, 1);
+        mRobotMotion.startMotor((int) RobotDevices.Motors.FOREARM_SWING_RIGHT, 20, 1000, 1);
+        mRobotMotion.startMotor((int) RobotDevices.Motors.WRIST_RIGHT, 15, 1000, 1);
     }
 
     private String getCleanServerUrl() {
@@ -670,6 +749,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
+
+
 
 
 
