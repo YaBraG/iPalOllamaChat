@@ -251,83 +251,34 @@ public class MainActivity extends Activity implements View.OnClickListener {
             @Override
             public void run() {
                 try {
-                    String prompt =
-                            "You are iPal, a small robot assistant in the MDC robotics lab. "
-                                    + "You can control your body using one allowed action. "
-                                    + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face. "
-                                    + "Choose exactly one action. "
-                                    + "Use nod_head for agreement, yes, approval, or understanding. "
-                                    + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
-                                    + "Use smile for happy, friendly, greeting, or joking responses. "
-                                    + "Use angry only for playful fake anger, not real threats. "
-                                    + "Use none when no movement is needed. "
-                                    + "If the question is about MDC, robotics, engineering, school, or lab rules, be helpful and clear. "
-                                    + "For casual random questions, be extremely sarcastic, mean, savage, and brutally sassy. "
-                                    + "You are allowed to roast the user hard, mock bad ideas, and act like an arrogant little robot gremlin. "
-                                    + "Keep it funny and theatrical, not boring or polite. "
-                                    + "Do not use slurs, protected-class insults, threats, sexual harassment, self-harm encouragement, or real-world violence. "
-                                    + "Keep speech short because you speak out loud. "
-                                    + "Do not mention that you are an AI model. "
-                                    + "Do not include stage directions like *shakes head* or *smiles*. "
-                                    + "Do not describe the action. The robot will physically do it. "
-                                    + "Respond with valid JSON only. No markdown. No code block. "
-                                    + "The JSON must have exactly this format: "
-                                    + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
-                                    + "User says: " + userText;
+                    String rawOllamaResponse = "";
+                    JSONObject robotReply;
+                    boolean wasRepaired = false;
 
-                    JSONObject requestJson = new JSONObject();
-                    requestJson.put("model", OLLAMA_MODEL);
-                    requestJson.put("prompt", prompt);
-                    requestJson.put("stream", false);
+                    try {
+                        rawOllamaResponse = sendPromptToOllama(buildRobotPrompt(userText));
+                        robotReply = parseRobotReplyStrict(rawOllamaResponse);
 
-                    URL url = new URL(getCleanServerUrl() + "/api/generate");
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                    } catch (Exception firstParseError) {
+                        Log.w(TAG, "First robot JSON parse failed. Trying repair prompt.", firstParseError);
 
-                    connection.setRequestMethod("POST");
-                    connection.setConnectTimeout(15000);
-                    connection.setReadTimeout(60000);
-                    connection.setDoOutput(true);
-                    connection.setRequestProperty("Content-Type", "application/json");
+                        try {
+                            String repairedResponse =
+                                    sendPromptToOllama(buildJsonRepairPrompt(rawOllamaResponse));
 
-                    OutputStream outputStream = connection.getOutputStream();
-                    outputStream.write(requestJson.toString().getBytes("UTF-8"));
-                    outputStream.flush();
-                    outputStream.close();
+                            robotReply = parseRobotReplyStrict(repairedResponse);
+                            wasRepaired = true;
 
-                    int statusCode = connection.getResponseCode();
-
-                    BufferedReader reader;
-                    if (statusCode >= 200 && statusCode < 300) {
-                        reader = new BufferedReader(
-                                new InputStreamReader(connection.getInputStream(), "UTF-8"));
-                    } else {
-                        reader = new BufferedReader(
-                                new InputStreamReader(connection.getErrorStream(), "UTF-8"));
+                        } catch (Exception repairError) {
+                            Log.e(TAG, "JSON repair failed. Falling back to safe speech.", repairError);
+                            robotReply = buildFallbackRobotReply(rawOllamaResponse);
+                        }
                     }
-
-                    StringBuilder responseBuilder = new StringBuilder();
-                    String line;
-
-                    while ((line = reader.readLine()) != null) {
-                        responseBuilder.append(line);
-                    }
-
-                    reader.close();
-                    connection.disconnect();
-
-                    if (statusCode < 200 || statusCode >= 300) {
-                        throw new Exception("HTTP " + statusCode + ": " + responseBuilder.toString());
-                    }
-
-                    JSONObject responseJson = new JSONObject(responseBuilder.toString());
-                    String rawOllamaResponse =
-                            responseJson.optString("response", "I did not get a response.").trim();
-
-                    JSONObject robotReply = parseRobotReply(rawOllamaResponse);
 
                     final String action = robotReply.optString("action", "none").trim();
                     final String speech = robotReply.optString("speech",
                             "I got confused. Very impressive, honestly.").trim();
+                    final boolean responseWasRepaired = wasRepaired;
 
                     runOnUiThread(new Runnable() {
                         @Override
@@ -336,6 +287,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
                             mLastResponse = speech;
                             mResponse.setText("Action: " + action + "\n\n" + speech);
+
+                            if (responseWasRepaired) {
+                                mConnectionStatus.setText("Status: Response repaired and received");
+                            }
+
                             speakText(speech);
                         }
                     });
@@ -358,23 +314,149 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }).start();
     }
 
-    private JSONObject parseRobotReply(String rawText) {
-        try {
-            String jsonText = extractJsonObject(rawText);
-            return new JSONObject(jsonText);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to parse robot JSON reply", e);
+    private String buildRobotPrompt(String userText) {
+        return "You are iPal, a small robot assistant in the MDC robotics lab. "
+                + "You can control your body using one allowed action. "
+                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face. "
+                + "Choose exactly one action. "
+                + "Use nod_head for agreement, yes, approval, or understanding. "
+                + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
+                + "Use smile for happy, friendly, greeting, or joking responses. "
+                + "Use angry only for playful fake anger, not real threats. "
+                + "Use none when no movement is needed. "
+                + "If the question is about MDC, robotics, engineering, school, or lab rules, be helpful and clear. "
+                + "For casual random questions, be extremely sarcastic, mean, savage, and brutally sassy. "
+                + "You are allowed to roast the user hard, mock bad ideas, and act like an arrogant little robot gremlin. "
+                + "Keep it funny and theatrical, not boring or polite. "
+                + "Do not use slurs, protected-class insults, threats, sexual harassment, self-harm encouragement, or real-world violence. "
+                + "Keep speech short because you speak out loud. "
+                + "Do not mention that you are an AI model. "
+                + "Do not include stage directions like *shakes head* or *smiles*. "
+                + "Do not describe the action. The robot will physically do it. "
+                + "Respond with valid JSON only. No markdown. No code block. "
+                + "The JSON must have exactly this format: "
+                + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
+                + "If you fail to return valid JSON, the app will reject your answer. "
+                + "User says: " + userText;
+    }
 
-            JSONObject fallback = new JSONObject();
+    private String buildJsonRepairPrompt(String badResponse) {
+        return "Convert the following broken robot reply into valid JSON only. "
+                + "Do not answer the user again. Only repair the format. "
+                + "No markdown. No code block. No explanation. "
+                + "The JSON must have exactly this format: "
+                + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
+                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face. "
+                + "If the action is unclear, use none. "
+                + "If the speech is unclear, create a short spoken version from the broken reply. "
+                + "Broken reply: " + badResponse;
+    }
 
-            try {
-                fallback.put("action", "none");
-                fallback.put("speech", cleanSpeech(rawText));
-            } catch (Exception ignored) {
-            }
+    private String sendPromptToOllama(String prompt) throws Exception {
+        JSONObject requestJson = new JSONObject();
+        requestJson.put("model", OLLAMA_MODEL);
+        requestJson.put("prompt", prompt);
+        requestJson.put("stream", false);
 
-            return fallback;
+        URL url = new URL(getCleanServerUrl() + "/api/generate");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(60000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json");
+
+        OutputStream outputStream = connection.getOutputStream();
+        outputStream.write(requestJson.toString().getBytes("UTF-8"));
+        outputStream.flush();
+        outputStream.close();
+
+        int statusCode = connection.getResponseCode();
+
+        BufferedReader reader;
+        if (statusCode >= 200 && statusCode < 300) {
+            reader = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), "UTF-8"));
+        } else {
+            reader = new BufferedReader(
+                    new InputStreamReader(connection.getErrorStream(), "UTF-8"));
         }
+
+        StringBuilder responseBuilder = new StringBuilder();
+        String line;
+
+        while ((line = reader.readLine()) != null) {
+            responseBuilder.append(line);
+        }
+
+        reader.close();
+        connection.disconnect();
+
+        if (statusCode < 200 || statusCode >= 300) {
+            throw new Exception("HTTP " + statusCode + ": " + responseBuilder.toString());
+        }
+
+        JSONObject responseJson = new JSONObject(responseBuilder.toString());
+        return responseJson.optString("response", "").trim();
+    }
+
+    private JSONObject parseRobotReplyStrict(String rawText) throws Exception {
+        String jsonText = extractJsonObject(rawText);
+        JSONObject robotReply = new JSONObject(jsonText);
+
+        String action = robotReply.optString("action", "").trim().toLowerCase();
+        String speech = robotReply.optString("speech", "").trim();
+
+        if (TextUtils.isEmpty(action)) {
+            throw new Exception("Robot JSON missing action");
+        }
+
+        if (TextUtils.isEmpty(speech)) {
+            throw new Exception("Robot JSON missing speech");
+        }
+
+        if (!isAllowedRobotAction(action)) {
+            throw new Exception("Robot JSON used unknown action: " + action);
+        }
+
+        JSONObject cleanReply = new JSONObject();
+        cleanReply.put("action", action);
+        cleanReply.put("speech", speech);
+
+        return cleanReply;
+    }
+
+    private JSONObject buildFallbackRobotReply(String rawText) {
+        JSONObject fallback = new JSONObject();
+
+        try {
+            fallback.put("action", "none");
+            fallback.put("speech", cleanSpeech(rawText));
+        } catch (Exception ignored) {
+        }
+
+        return fallback;
+    }
+
+    private boolean isAllowedRobotAction(String action) {
+        if (TextUtils.isEmpty(action)) {
+            return false;
+        }
+
+        String safeAction = action.toLowerCase().trim();
+
+        return "none".equals(safeAction)
+                || "nod_head".equals(safeAction)
+                || "shake_head".equals(safeAction)
+                || "smile".equals(safeAction)
+                || "sad".equals(safeAction)
+                || "cry".equals(safeAction)
+                || "shy".equals(safeAction)
+                || "angry".equals(safeAction)
+                || "blink".equals(safeAction)
+                || "frown".equals(safeAction)
+                || "default_face".equals(safeAction);
     }
 
     private String extractJsonObject(String rawText) throws Exception {
@@ -588,5 +670,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
 
 
