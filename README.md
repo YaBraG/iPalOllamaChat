@@ -13,8 +13,9 @@ The app can:
 - Send prompts to the `llama3.2:3b` model.
 - Force the model to return a JSON reply with an `action` and `speech` field.
 - Retry with a JSON repair prompt if the model returns malformed JSON.
+- Preserve a valid action even if the model accidentally returns empty speech, then fill in safe default speech.
 - Validate the requested action against a fixed whitelist.
-- Trigger safe iPal gestures and facial expressions through `RobotMotion`.
+- Trigger safe iPal head gestures, face expressions, and tested motor presets through `RobotMotion`.
 - Speak only the clean `speech` text through the iPal TTS system.
 - Display the selected action and spoken answer in the app UI.
 
@@ -46,20 +47,36 @@ Current safe action whitelist:
 | `blink` | Blink face |
 | `frown` | Frown face |
 | `default_face` | Reset/default face |
+| `reset_motors` | Reset all motors |
+| `right_arm_small_wave` | Small right-arm preset wave |
 
 The model may choose an action, but the app only executes actions in this whitelist.
+
+## Motor preset policy
+
+Motor actions are intentionally limited to fixed presets.
+
+The model does **not** choose raw motor names, raw angles, speed values, wheel movement, or base movement. The app decides the motor angles internally.
+
+Current motor presets:
+
+| Preset | Internal behavior |
+|---|---|
+| `reset_motors` | Calls `mRobotMotion.reset((int) RobotDevices.Units.ALL_MOTORS)` |
+| `right_arm_small_wave` | Moves the right arm, forearm, and wrist with small fixed angles |
 
 ## JSON reliability
 
 The app now uses a two-step JSON handling flow:
 
 ```text
-First model response -> strict JSON parse
-Bad JSON -> repair prompt -> strict JSON parse again
+First model response -> strict JSON/action parse
+Bad JSON or unknown action -> repair prompt -> strict JSON/action parse again
+Valid action with empty speech -> preserve action and fill default speech
 Still bad -> safe fallback with no action
 ```
 
-This keeps the robot usable even when the local model adds markdown, stage directions, or plain text by mistake.
+This keeps the robot usable even when the local model adds markdown, stage directions, plain text, or an empty `speech` field by mistake.
 
 ## Project setup
 
@@ -151,6 +168,14 @@ Smile and introduce yourself.
 ```
 
 ```text
+Reset your motors and say done.
+```
+
+```text
+Wave with your right arm and say hello.
+```
+
+```text
 What is Miami Dade College?
 ```
 
@@ -184,7 +209,8 @@ Ignored examples:
 - The default server URL is still hardcoded in `MainActivity.java`, but the user-entered URL is saved after use.
 - The app uses one-shot prompt/response calls, not a persistent conversation memory.
 - JSON repair improves reliability, but small local models may still occasionally produce unusable output.
-- Only safe head and face actions are enabled.
+- Only safe head actions, face actions, and two tested motor presets are enabled.
+- Arbitrary motor angles are intentionally not exposed to the model.
 - Wheel/base movement is intentionally not enabled yet.
 - Face recognition/NUI support is not implemented yet.
 - MDC-specific knowledge is currently prompt-based only; no local MDC document database is connected yet.
@@ -193,7 +219,7 @@ Ignored examples:
 
 Near-term:
 
-- Add more safe body actions after inspecting AvatarMind motion APIs.
+- Add more tested fixed motor presets after inspecting AvatarMind motion APIs.
 - Inspect NUI / face recognition APIs.
 - Add local MDC knowledge documents or retrieval.
 
@@ -205,4 +231,4 @@ Later:
 
 ## Status
 
-Working prototype. Current milestone: local Ollama chat, JSON action routing, JSON repair retry, saved server URL, RobotMotion gestures, iPal TTS, and sassy lab-assistant personality.
+Working prototype. Current milestone: local Ollama chat, JSON action routing, JSON repair retry, saved server URL, safe motor presets, RobotMotion gestures, iPal TTS, and sassy lab-assistant personality.
