@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">iPal Ollama Chat</string>
+    <string name="action_settings">Settings</string>
+    <string name="hello_world">Hello world!</string>
+    <string name="robot_status">Robot Status: </string>
+    <string name="robot_stauts_ready">Robot is Ready</string>
+    <string name="robot_volume">Robot Volume: </string>
+    <string name="robot_content">Content From User: </string>
+    <string name="asr_enable">Enable ASR</string>
+    <string name="asr_disable">Disable ASR</string>
+    <string name="asr_deliver">Deliver to Nlu</string>
+    <string name="asr_block">Skip from Nlu</string>
+    <string name="disable_asr">ASR is disabled.</string>
+    <string name="robot_listening">Robot Listening</string>
+    <string name="robot_processing">Robot Processing</string>
+    <string name="tts_input_tip">Please input content: </string>
+    <string name="tts_status">TTS Status: </string>
+    <string name="tts_speak">Speak</string>
+    <string name="tts_start_speaking">Start Speaking with requestId: </string>
+    <string name="tts_stop_speaking">Speaking ends with requestId: </string>
+    <string name="nlu_input_tip">Please input content: </string>
+    <string name="nlu_status">NLU Status: </string>
+    <string name="nlu_understanding">Understand</string>
+    <string name="nlu_start_understanding">Start Understanding with requestId: </string>
+    <string name="nlu_stop_understanding">Understanding ends with requestId: </string>
+    <string name="hey_iPal">Hey iPal</string>
+
+</resources>

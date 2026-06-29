@@ -1,0 +1,38 @@
+# Gradle / Android build output
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local machine config
+local.properties
+*.iml
+.idea/
+
+# Backups / generated local files
+_backups/
+*.bak
+*.tmp
+
+# APKs and signing keys
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# SDKs / external tools
+android-sdk*/
+avatar-sdk*/
+iPalSDK/
+Android Studio*/
+
+import-summary.txt
