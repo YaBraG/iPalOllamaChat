@@ -17,7 +17,8 @@ User prompt
   -> Android app
   -> Ollama /api/generate
   -> Local model returns JSON
-  -> App extracts action + speech
+  -> App strict-parses action + speech
+  -> If parse fails, app asks Ollama to repair the reply into JSON
   -> App validates action whitelist
   -> RobotMotion performs action
   -> SpeechManager speaks speech
@@ -56,6 +57,49 @@ The app should never blindly execute arbitrary model output. Any new action must
 
 1. The prompt's allowed action list.
 2. The Java whitelist in `performRobotAction(String action)`.
+3. The allowed-action validator used by strict JSON parsing.
+
+## JSON repair behavior
+
+The current flow is:
+
+```text
+send normal robot prompt
+try parseRobotReplyStrict(raw response)
+if parsing fails:
+  send buildJsonRepairPrompt(bad response)
+  try parseRobotReplyStrict(repaired response)
+if repair fails:
+  buildFallbackRobotReply(raw response)
+```
+
+This is designed to handle cases where the local model accidentally returns markdown, stage directions, or plain text instead of the required JSON object.
+
+Important methods:
+
+- `buildRobotPrompt(String userText)` creates the normal robot/personality prompt.
+- `sendPromptToOllama(String prompt)` sends a prompt to `/api/generate` and returns the raw model response string.
+- `parseRobotReplyStrict(String rawText)` extracts JSON, validates `action`, validates `speech`, and returns cleaned JSON.
+- `buildJsonRepairPrompt(String badResponse)` asks the model to convert a broken response into the required JSON format.
+- `buildFallbackRobotReply(String rawText)` uses `action: none` and cleaned text if repair fails.
+- `isAllowedRobotAction(String action)` is the action whitelist used during parsing.
+
+## Server URL persistence
+
+The app now saves the last cleaned Ollama server URL using Android `SharedPreferences`.
+
+Relevant constants:
+
+```java
+private static final String PREFS_NAME = "iPalOllamaChatPrefs";
+private static final String PREF_SERVER_URL = "server_url";
+```
+
+Relevant behavior:
+
+- On launch, `initView()` loads the saved URL if one exists.
+- `getCleanServerUrl()` normalizes the URL and saves it through `saveServerUrl(String serverUrl)`.
+- The default URL is still used if no saved URL exists.
 
 ## Personality prompt
 
@@ -74,11 +118,27 @@ Reads the user prompt from the UI, updates status labels, and calls `askOllama(u
 
 ### `askOllama(String userText)`
 
-Builds the prompt, sends it to Ollama, receives the model response, parses JSON, and sends the result back to the UI thread.
+Coordinates the full request flow: normal prompt, strict JSON parse, optional repair prompt, fallback, UI update, robot action, and speech.
 
-### `parseRobotReply(String rawText)`
+### `buildRobotPrompt(String userText)`
 
-Attempts to extract a JSON object from the model output. If parsing fails, the app falls back to action `none` and cleans the raw text for speech.
+Builds the main robot prompt, including personality, allowed actions, JSON format requirements, and the user prompt.
+
+### `sendPromptToOllama(String prompt)`
+
+Sends a prompt to the Ollama `/api/generate` endpoint and returns the model's raw `response` string.
+
+### `parseRobotReplyStrict(String rawText)`
+
+Extracts a JSON object and validates that both `action` and `speech` are present. It also rejects actions not included in the whitelist.
+
+### `buildJsonRepairPrompt(String badResponse)`
+
+Builds the second-chance prompt used when the first model response is not valid robot JSON.
+
+### `buildFallbackRobotReply(String rawText)`
+
+Creates a safe fallback with `action: none` and a cleaned speech string when JSON repair fails.
 
 ### `performRobotAction(String action)`
 
@@ -170,10 +230,8 @@ Do not commit:
 
 Recommended order:
 
-1. Save server URL using `SharedPreferences`.
-2. Add stronger JSON retry behavior when the model ignores JSON format.
-3. Add more safe gestures from AvatarMind motion demos.
-4. Inspect NUI / face recognition APIs.
-5. Add local MDC knowledge documents.
-6. Add speech input.
-7. Add safe movement only after wheel APIs and obstacle behavior are fully understood.
+1. Add more safe gestures from AvatarMind motion demos.
+2. Inspect NUI / face recognition APIs.
+3. Add local MDC knowledge documents.
+4. Add speech input.
+5. Add safe movement only after wheel APIs and obstacle behavior are fully understood.
