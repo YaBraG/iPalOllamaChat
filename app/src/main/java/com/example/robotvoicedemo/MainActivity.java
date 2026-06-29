@@ -2,6 +2,7 @@ package com.example.robotvoicedemo;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.robot.motion.RobotMotion;
 import android.robot.speech.SpeechManager;
@@ -30,6 +31,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String TAG = "iPalOllamaChat";
     private static final String DEFAULT_SERVER_URL = "http://192.168.2.36:11434";
     private static final String OLLAMA_MODEL = "llama3.2:3b";
+
+    private static final String PREFS_NAME = "iPalOllamaChatPrefs";
+    private static final String PREF_SERVER_URL = "server_url";
 
     private ImageView mBtnBack;
 
@@ -113,7 +117,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mBtnClear = (Button) findViewById(R.id.btn_clear);
         mBtnSpeakAgain = (Button) findViewById(R.id.btn_speak_again);
 
-        mServerUrl.setText(DEFAULT_SERVER_URL);
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String savedServerUrl = preferences.getString(PREF_SERVER_URL, DEFAULT_SERVER_URL);
+
+        mServerUrl.setText(savedServerUrl);
         mConnectionStatus.setText("Status: Ready");
         mTtsStatus.setText("TTS Status: Ready");
     }
@@ -503,7 +510,21 @@ public class MainActivity extends Activity implements View.OnClickListener {
             serverUrl = serverUrl.substring(0, serverUrl.length() - 1);
         }
 
+        mServerUrl.setText(serverUrl);
+        saveServerUrl(serverUrl);
+
         return serverUrl;
+    }
+
+    private void saveServerUrl(String serverUrl) {
+        if (TextUtils.isEmpty(serverUrl)) {
+            return;
+        }
+
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        preferences.edit()
+                .putString(PREF_SERVER_URL, serverUrl)
+                .apply();
     }
 
     private void enableRobotTts() {
@@ -567,4 +588,5 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
 
