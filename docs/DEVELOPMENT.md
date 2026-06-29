@@ -15,11 +15,13 @@ This document captures the current working setup for the iPal Ollama Chat app.
 ```text
 User prompt
   -> Android app
-  -> Ollama /api/generate
+  -> App captures/normalizes server URL on the UI thread
+  -> Background thread sends prompt to Ollama /api/generate
   -> Local model returns JSON
   -> App strict-parses action + speech
   -> If parse fails, app asks Ollama to repair the reply into JSON
   -> App validates action whitelist
+  -> App fills safe default speech if action is valid but speech is empty
   -> RobotMotion performs action
   -> SpeechManager speaks speech
 ```
@@ -51,6 +53,8 @@ angry
 blink
 frown
 default_face
+reset_motors
+right_arm_small_wave
 ```
 
 The app should never blindly execute arbitrary model output. Any new action must be added to both:
@@ -78,11 +82,12 @@ This is designed to handle cases where the local model accidentally returns mark
 Important methods:
 
 - `buildRobotPrompt(String userText)` creates the normal robot/personality prompt.
-- `sendPromptToOllama(String prompt)` sends a prompt to `/api/generate` and returns the raw model response string.
-- `parseRobotReplyStrict(String rawText)` extracts JSON, validates `action`, validates `speech`, and returns cleaned JSON.
+- `sendPromptToOllama(String prompt, String requestServerUrl)` sends a prompt to `/api/generate` and returns the raw model response string.
+- `parseRobotReplyStrict(String rawText)` extracts JSON, validates `action`, and validates/fills `speech`.
 - `buildJsonRepairPrompt(String badResponse)` asks the model to convert a broken response into the required JSON format.
 - `buildFallbackRobotReply(String rawText)` uses `action: none` and cleaned text if repair fails.
 - `isAllowedRobotAction(String action)` is the action whitelist used during parsing.
+- `getDefaultSpeechForAction(String action)` fills safe spoken text when the model returns a valid action with empty speech.
 
 ## Server URL persistence
 
@@ -99,7 +104,40 @@ Relevant behavior:
 
 - On launch, `initView()` loads the saved URL if one exists.
 - `getCleanServerUrl()` normalizes the URL and saves it through `saveServerUrl(String serverUrl)`.
+- `askIpal()` captures the cleaned URL on the UI thread before starting the background Ollama request.
+- `sendPromptToOllama(String prompt, String requestServerUrl)` uses the captured string and does not touch UI widgets from the background thread.
 - The default URL is still used if no saved URL exists.
+
+## Safe motor presets
+
+The app now includes two fixed motor preset actions.
+
+```text
+reset_motors
+right_arm_small_wave
+```
+
+These are intentionally high-level actions. The model does not choose motor IDs, raw angles, speeds, durations, or wheel movement.
+
+Relevant import:
+
+```java
+import android.robot.hw.RobotDevices;
+```
+
+Current preset behavior:
+
+```java
+mRobotMotion.reset((int) RobotDevices.Units.ALL_MOTORS);
+```
+
+```java
+mRobotMotion.startMotor((int) RobotDevices.Motors.ARM_SWING_RIGHT, 15, 1000, 1);
+mRobotMotion.startMotor((int) RobotDevices.Motors.FOREARM_SWING_RIGHT, 20, 1000, 1);
+mRobotMotion.startMotor((int) RobotDevices.Motors.WRIST_RIGHT, 15, 1000, 1);
+```
+
+Do not expose arbitrary motor angles to the model until the physical pose safety, range behavior, and reset behavior are better understood.
 
 ## Personality prompt
 
@@ -114,9 +152,9 @@ Current behavior:
 
 ### `askIpal()`
 
-Reads the user prompt from the UI, updates status labels, and calls `askOllama(userText)`.
+Reads the user prompt from the UI, updates status labels, captures the cleaned server URL on the UI thread, and calls `askOllama(userText, requestServerUrl)`.
 
-### `askOllama(String userText)`
+### `askOllama(String userText, String requestServerUrl)`
 
 Coordinates the full request flow: normal prompt, strict JSON parse, optional repair prompt, fallback, UI update, robot action, and speech.
 
@@ -124,13 +162,17 @@ Coordinates the full request flow: normal prompt, strict JSON parse, optional re
 
 Builds the main robot prompt, including personality, allowed actions, JSON format requirements, and the user prompt.
 
-### `sendPromptToOllama(String prompt)`
+### `sendPromptToOllama(String prompt, String requestServerUrl)`
 
-Sends a prompt to the Ollama `/api/generate` endpoint and returns the model's raw `response` string.
+Sends a prompt to the Ollama `/api/generate` endpoint and returns the model's raw `response` string. It receives the already-cleaned server URL as a string to avoid touching the UI from a background thread.
 
 ### `parseRobotReplyStrict(String rawText)`
 
-Extracts a JSON object and validates that both `action` and `speech` are present. It also rejects actions not included in the whitelist.
+Extracts a JSON object and validates that `action` is present and whitelisted. If `speech` is empty but the action is valid, the app fills safe default speech with `getDefaultSpeechForAction(String action)`.
+
+### `getDefaultSpeechForAction(String action)`
+
+Returns short safe speech such as `Done.`, `Hello.`, `Yes.`, or `No.` when the model returns a valid action but empty speech.
 
 ### `buildJsonRepairPrompt(String badResponse)`
 
@@ -143,6 +185,14 @@ Creates a safe fallback with `action: none` and a cleaned speech string when JSO
 ### `performRobotAction(String action)`
 
 Validates the requested action and calls the matching safe `RobotMotion` API.
+
+### `resetAllMotors()`
+
+Runs the fixed all-motors reset preset.
+
+### `rightArmSmallWave()`
+
+Runs the fixed right-arm wave preset using small internal motor angles.
 
 ### `speakText(String text)`
 
@@ -230,7 +280,7 @@ Do not commit:
 
 Recommended order:
 
-1. Add more safe gestures from AvatarMind motion demos.
+1. Add more fixed safe motor presets from AvatarMind motion demos.
 2. Inspect NUI / face recognition APIs.
 3. Add local MDC knowledge documents.
 4. Add speech input.
