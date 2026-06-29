@@ -55,6 +55,8 @@ Good:
 | `blink` | Blink expression |
 | `frown` | Frown expression |
 | `default_face` | Reset/default face |
+| `reset_motors` | Reset all motors |
+| `right_arm_small_wave` | Small fixed right-arm wave preset |
 
 ## Execution rule
 
@@ -79,16 +81,43 @@ Current result:
 Action ignored or rejected because drive_forward is not whitelisted.
 ```
 
+## Motor preset rule
+
+Motor actions must remain fixed presets for now.
+
+Allowed:
+
+```json
+{
+  "action": "right_arm_small_wave",
+  "speech": "Hi there."
+}
+```
+
+Not allowed:
+
+```json
+{
+  "action": "move_motor",
+  "motor": "ARM_SWING_RIGHT",
+  "angle": 65,
+  "speech": "Watch this."
+}
+```
+
+The model does not choose motor IDs, angles, speed, duration, wheel distance, or turn angle. The app owns those values internally.
+
 ## JSON repair behavior
 
 The app uses a retry flow for malformed JSON:
 
 ```text
 1. Send normal robot prompt.
-2. Try strict JSON parse.
+2. Try strict JSON/action parse.
 3. If parsing fails, send a repair prompt to Ollama.
-4. Try strict JSON parse again.
-5. If repair fails, use action none and cleaned fallback speech.
+4. Try strict JSON/action parse again.
+5. If action is valid but speech is empty, fill default speech.
+6. If repair fails, use action none and cleaned fallback speech.
 ```
 
 The repair prompt does not ask the model to answer the user again. It only asks the model to convert the broken reply into the required JSON format.
@@ -108,18 +137,38 @@ The repair output should become:
 }
 ```
 
+If the model returns a valid action but empty speech:
+
+```json
+{
+  "action": "reset_motors",
+  "speech": ""
+}
+```
+
+The app keeps the action and fills default speech, such as:
+
+```json
+{
+  "action": "reset_motors",
+  "speech": "Done."
+}
+```
+
 ## Adding a new action
 
 To add a new action safely:
 
 1. Confirm the AvatarMind robot API call exists.
 2. Test the action in a small isolated demo first.
-3. Add the action name to the prompt's allowed action list.
-4. Add the action name to `isAllowedRobotAction(String action)`.
-5. Add a matching case in `performRobotAction(String action)`.
-6. Build and install on the robot.
-7. Test with simple prompts.
-8. Commit only after the robot action works reliably.
+3. Use a fixed preset name, not raw motor parameters.
+4. Add the action name to the prompt's allowed action list.
+5. Add the action name to `isAllowedRobotAction(String action)`.
+6. Add a matching case in `performRobotAction(String action)`.
+7. Add a default speech case to `getDefaultSpeechForAction(String action)` when useful.
+8. Build and install on the robot.
+9. Test with simple prompts.
+10. Commit only after the robot action works reliably.
 
 ## Current safety policy
 
@@ -128,16 +177,19 @@ Safe now:
 - Head nodding.
 - Head shaking.
 - Face/emoji expressions.
+- All-motor reset preset.
+- Small fixed right-arm wave preset.
 
 Not enabled yet:
 
 - Wheel movement.
 - Base movement.
 - Navigation.
-- Arm/body motor movement.
+- Arbitrary arm/body motor movement.
+- Raw motor-angle control by the model.
 - Physical interactions with people or objects.
 
-Movement actions should stay disabled until wheel APIs, stop behavior, and obstacle behavior are understood.
+Movement actions should stay disabled until wheel APIs, stop behavior, obstacle behavior, and physical pose safety are understood.
 
 ## Example prompts
 
@@ -164,6 +216,32 @@ Expected:
 {
   "action": "smile",
   "speech": "I'm iPal, the tiny lab gremlin supervising this circus."
+}
+```
+
+```text
+Reset your motors and say done.
+```
+
+Expected:
+
+```json
+{
+  "action": "reset_motors",
+  "speech": "Done."
+}
+```
+
+```text
+Wave with your right arm and say hello.
+```
+
+Expected:
+
+```json
+{
+  "action": "right_arm_small_wave",
+  "speech": "Hello."
 }
 ```
 
