@@ -57,6 +57,7 @@ Good:
 | `default_face` | Reset/default face |
 | `reset_motors` | Reset all motors |
 | `right_arm_small_wave` | Small fixed right-arm wave preset |
+| `left_arm_small_wave` | Small fixed left-arm wave preset |
 
 ## Execution rule
 
@@ -90,6 +91,15 @@ Allowed:
 ```json
 {
   "action": "right_arm_small_wave",
+  "speech": "Hi there."
+}
+```
+
+Also allowed:
+
+```json
+{
+  "action": "left_arm_small_wave",
   "speech": "Hi there."
 }
 ```
@@ -179,6 +189,7 @@ Safe now:
 - Face/emoji expressions.
 - All-motor reset preset.
 - Small fixed right-arm wave preset.
+- Small fixed left-arm wave preset.
 
 Not enabled yet:
 
@@ -241,6 +252,19 @@ Expected:
 ```json
 {
   "action": "right_arm_small_wave",
+  "speech": "Hello."
+}
+```
+
+```text
+Wave with your left arm and say hello.
+```
+
+Expected:
+
+```json
+{
+  "action": "left_arm_small_wave",
   "speech": "Hello."
 }
 ```
