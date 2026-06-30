@@ -320,7 +320,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private String buildRobotPrompt(String userText) {
         return "You are iPal, a small robot assistant in the MDC robotics lab. "
                 + "You can control your body using one allowed action. "
-                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave, left_arm_small_wave. "
+                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave, left_arm_small_wave, both_arms_small_wave. "
                 + "Choose exactly one action. "
                 + "Use nod_head for agreement, yes, approval, or understanding. "
                 + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
@@ -329,6 +329,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "Use none when no movement is needed. "
                 + "Use right_arm_small_wave when the user asks you to wave with your right arm, greet with your right arm, show off with your right arm, or make a small right-arm gesture. "
                 + "Use left_arm_small_wave when the user asks you to wave with your left arm, greet with your left arm, show off with your left arm, or make a small left-arm gesture. "
+                + "Use both_arms_small_wave when the user asks you to wave with both arms, raise both arms, greet with both arms, or wave without specifying left or right. "
                 + "Use reset_motors only when the user asks you to reset your motors, reset your body, return to normal, or stop holding a pose. "
                 + "If the question is about MDC, robotics, engineering, school, or lab rules, be helpful and clear. "
                 + "For casual random questions, be extremely sarcastic, mean, savage, and brutally sassy. "
@@ -354,7 +355,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "The JSON must have exactly this format: "
                 + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
                 + "The speech field must never be empty. "
-                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave, left_arm_small_wave. "
+                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave, left_arm_small_wave, both_arms_small_wave. "
                 + "If the action is unclear, use none. "
                 + "If the speech is unclear, create a short spoken version from the broken reply. "
                 + "Broken reply: " + badResponse;
@@ -509,7 +510,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 || "default_face".equals(safeAction)
                 || "reset_motors".equals(safeAction)
                 || "right_arm_small_wave".equals(safeAction)
-                || "left_arm_small_wave".equals(safeAction);
+                || "left_arm_small_wave".equals(safeAction)
+                || "both_arms_small_wave".equals(safeAction);
     }
 
     private String extractJsonObject(String rawText) throws Exception {
@@ -638,6 +640,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 return;
             }
 
+            if ("both_arms_small_wave".equals(safeAction)) {
+                bothArmsSmallWave();
+                mConnectionStatus.setText("Status: Action performed: both arms small wave");
+                return;
+            }
             mConnectionStatus.setText("Status: Ignored unsafe/unknown action: " + safeAction);
 
         } catch (Exception e) {
@@ -676,6 +683,16 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mRobotMotion.startMotor((int) RobotDevices.Motors.ARM_SWING_LEFT, 15, 1000, 1);
         mRobotMotion.startMotor((int) RobotDevices.Motors.FOREARM_SWING_LEFT, 20, 1000, 1);
         mRobotMotion.startMotor((int) RobotDevices.Motors.WRIST_LEFT, 15, 1000, 1);
+    }
+
+    private void bothArmsSmallWave() {
+        if (mRobotMotion == null) {
+            return;
+        }
+
+        // Safe preset only. Combines the already-tested right and left arm presets.
+        rightArmSmallWave();
+        leftArmSmallWave();
     }
 
     private String getCleanServerUrl() {
@@ -773,6 +790,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
+
 
 
 
