@@ -16,6 +16,7 @@ The app can:
 - Preserve a valid action even if the model accidentally returns empty speech, then fill in safe default speech.
 - Validate the requested action against a fixed whitelist.
 - Trigger safe iPal head gestures, face expressions, and tested motor presets through `RobotMotion`.
+- Automatically reset motors after arm gesture presets.
 - Speak only the clean `speech` text through the iPal TTS system.
 - Display the selected action and spoken answer in the app UI.
 
@@ -48,9 +49,9 @@ Current safe action whitelist:
 | `frown` | Frown face |
 | `default_face` | Reset/default face |
 | `reset_motors` | Reset all motors |
-| `right_arm_small_wave` | Small right-arm preset wave |
-| `left_arm_small_wave` | Small left-arm preset wave |
-| `both_arms_small_wave` | Small both-arms preset wave |
+| `right_arm_small_wave` | Small right-arm preset wave, then auto-reset |
+| `left_arm_small_wave` | Small left-arm preset wave, then auto-reset |
+| `both_arms_small_wave` | Small both-arms preset wave, then auto-reset |
 
 The model may choose an action, but the app only executes actions in this whitelist.
 
@@ -68,6 +69,14 @@ Current motor presets:
 | `right_arm_small_wave` | Moves the right arm, forearm, and wrist with small fixed angles |
 | `left_arm_small_wave` | Moves the left arm, forearm, and wrist with small fixed angles |
 | `both_arms_small_wave` | Runs the tested right-arm and left-arm wave presets together |
+
+Arm gesture presets are followed by a centralized delayed reset. The app calls `performRobotAction(action)`, checks `shouldAutoResetAfterAction(action)`, and schedules `resetAllMotors()` after the configured delay. This keeps reset behavior out of the individual gesture blocks.
+
+## Code organization notes
+
+The action system now uses centralized action constants and one `ALLOWED_ACTIONS_TEXT` string so the normal prompt, repair prompt, validator, and execution logic stay aligned.
+
+Robot replies are handled on the UI thread through `handleRobotReplyOnUi(...)`. `performRobotAction(...)` returns whether the action actually ran, and auto-reset is scheduled only for motor gesture actions that were successfully performed.
 
 ## JSON reliability
 
@@ -243,4 +252,4 @@ Later:
 
 ## Status
 
-Working prototype. Current milestone: local Ollama chat, JSON action routing, JSON repair retry, saved server URL, safe motor presets, RobotMotion gestures, iPal TTS, and sassy lab-assistant personality.
+Working prototype. Current milestone: local Ollama chat, JSON action routing, JSON repair retry, saved server URL, centralized motor auto-reset, safe motor presets, RobotMotion gestures, iPal TTS, and sassy lab-assistant personality.
