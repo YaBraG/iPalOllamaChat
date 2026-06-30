@@ -22,11 +22,37 @@ User prompt
   -> If parse fails, app asks Ollama to repair the reply into JSON
   -> App validates action whitelist
   -> App fills safe default speech if action is valid but speech is empty
-  -> RobotMotion performs action
+  -> UI thread handles the cleaned robot reply
+  -> performRobotAction(action) returns whether an action actually ran
+  -> If action was an arm gesture, app schedules delayed motor reset
   -> SpeechManager speaks speech
 ```
 
 The robot action and spoken text are separated intentionally. The model decides what action fits the answer, but the Android app decides whether that action is safe and allowed.
+
+## Action constants
+
+The app now centralizes robot action names as constants:
+
+```java
+private static final String ACTION_NONE = "none";
+private static final String ACTION_NOD_HEAD = "nod_head";
+private static final String ACTION_SHAKE_HEAD = "shake_head";
+private static final String ACTION_SMILE = "smile";
+private static final String ACTION_SAD = "sad";
+private static final String ACTION_CRY = "cry";
+private static final String ACTION_SHY = "shy";
+private static final String ACTION_ANGRY = "angry";
+private static final String ACTION_BLINK = "blink";
+private static final String ACTION_FROWN = "frown";
+private static final String ACTION_DEFAULT_FACE = "default_face";
+private static final String ACTION_RESET_MOTORS = "reset_motors";
+private static final String ACTION_RIGHT_ARM_SMALL_WAVE = "right_arm_small_wave";
+private static final String ACTION_LEFT_ARM_SMALL_WAVE = "left_arm_small_wave";
+private static final String ACTION_BOTH_ARMS_SMALL_WAVE = "both_arms_small_wave";
+```
+
+The `ALLOWED_ACTIONS_TEXT` string is built from those constants and reused by both the normal prompt and JSON repair prompt.
 
 ## JSON action protocol
 
@@ -59,11 +85,14 @@ left_arm_small_wave
 both_arms_small_wave
 ```
 
-The app should never blindly execute arbitrary model output. Any new action must be added to both:
+The app should never blindly execute arbitrary model output. Any new action must be added to:
 
-1. The prompt's allowed action list.
-2. The Java whitelist in `performRobotAction(String action)`.
-3. The allowed-action validator used by strict JSON parsing.
+1. The action constants.
+2. `ALLOWED_ACTIONS_TEXT` if it is safe for the model to choose.
+3. `isAllowedRobotAction(String action)`.
+4. `performRobotAction(String action)`.
+5. `shouldAutoResetAfterAction(String action)` if the action should return to neutral automatically.
+6. `getDefaultSpeechForAction(String action)` when useful.
 
 ## JSON repair behavior
 
@@ -93,7 +122,7 @@ Important methods:
 
 ## Server URL persistence
 
-The app now saves the last cleaned Ollama server URL using Android `SharedPreferences`.
+The app saves the last cleaned Ollama server URL using Android `SharedPreferences`.
 
 Relevant constants:
 
@@ -112,7 +141,7 @@ Relevant behavior:
 
 ## Safe motor presets
 
-The app now includes four fixed motor preset actions.
+The app includes four fixed motor preset actions.
 
 ```text
 reset_motors
@@ -160,6 +189,33 @@ leftArmSmallWave();
 
 Do not expose arbitrary motor angles to the model until the physical pose safety, range behavior, and reset behavior are better understood.
 
+## Centralized motor auto-reset
+
+Arm gestures return to neutral automatically through centralized logic.
+
+Current behavior:
+
+```text
+handleRobotReplyOnUi(action, speech, responseWasRepaired)
+  -> performRobotAction(action)
+  -> if action ran and shouldAutoResetAfterAction(action)
+       scheduleMotorResetAfterGesture()
+```
+
+`performRobotAction(String action)` now returns `true` only when a known action actually ran. This prevents auto-reset from being scheduled for unknown or ignored actions.
+
+`shouldAutoResetAfterAction(String action)` currently returns `true` for:
+
+```text
+right_arm_small_wave
+left_arm_small_wave
+both_arms_small_wave
+```
+
+`reset_motors` cancels any pending motor reset before resetting immediately.
+
+`mMainHandler` and `mMotorResetRunnable` are created once in `initData()`. Pending reset callbacks are removed before scheduling a new reset and again in `onDestroy()`.
+
 ## Personality prompt
 
 Current behavior:
@@ -177,7 +233,11 @@ Reads the user prompt from the UI, updates status labels, captures the cleaned s
 
 ### `askOllama(String userText, String requestServerUrl)`
 
-Coordinates the full request flow: normal prompt, strict JSON parse, optional repair prompt, fallback, UI update, robot action, and speech.
+Coordinates the request flow: normal prompt, strict JSON parse, optional repair prompt, fallback, and UI handoff.
+
+### `handleRobotReplyOnUi(String action, String speech, boolean responseWasRepaired)`
+
+Runs the safe robot action, schedules auto-reset if needed, updates the response UI, and speaks the cleaned response text.
 
 ### `buildRobotPrompt(String userText)`
 
@@ -205,7 +265,15 @@ Creates a safe fallback with `action: none` and a cleaned speech string when JSO
 
 ### `performRobotAction(String action)`
 
-Validates the requested action and calls the matching safe `RobotMotion` API.
+Validates the requested action, calls the matching safe `RobotMotion` API, and returns whether an action actually ran.
+
+### `shouldAutoResetAfterAction(String action)`
+
+Returns whether the completed action should schedule a delayed motor reset.
+
+### `scheduleMotorResetAfterGesture()`
+
+Cancels any previous pending motor reset and schedules `resetAllMotors()` after `MOTOR_RESET_DELAY_MS`.
 
 ### `resetAllMotors()`
 
@@ -289,6 +357,7 @@ After a working change:
 git status
 git add .
 git commit -m "Describe the working change"
+git pull --rebase origin master
 git push
 ```
 
