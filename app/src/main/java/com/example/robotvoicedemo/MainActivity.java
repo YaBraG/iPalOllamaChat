@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.robot.hw.RobotDevices;
+import android.robot.hw.RobotSystem;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -39,6 +40,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String PREF_SERVER_URL = "server_url";
 
     private static final int MOTOR_RESET_DELAY_MS = 2000;
+    private static final long TOUCH_REACTION_COOLDOWN_MS = 2500;
 
     private static final String ACTION_NONE = "none";
     private static final String ACTION_NOD_HEAD = "nod_head";
@@ -126,11 +128,17 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private InputMethodManager mInputMethodManager;
     private SpeechManager mSpeechManager;
     private RobotMotion mRobotMotion = new RobotMotion();
+    private RobotSystem mRobotSystem;
 
     private Handler mMainHandler;
     private Runnable mMotorResetRunnable;
 
     private String mLastResponse = "";
+    private long mLastTouchReactionTimeMs = 0;
+
+    private int mLastTtsRequestId = -1;
+    private int mCurrentOllamaRequestToken = 0;
+    private boolean mWaitingForOllama = false;
 
     private TtsListener mTtsListener = new TtsListener() {
         @Override
@@ -141,11 +149,23 @@ public class MainActivity extends Activity implements View.OnClickListener {
         @Override
         public void onEnd(int requestId) {
             mTtsStatus.setText("TTS Status: Finished, requestId: " + requestId);
+
+            if (requestId == mLastTtsRequestId) {
+                mLastTtsRequestId = -1;
+            }
         }
 
         @Override
         public void onError(int error) {
             mTtsStatus.setText("TTS Status: Error " + error);
+            mLastTtsRequestId = -1;
+        }
+    };
+
+    private RobotSystem.Listener mRobotSystemListener = new RobotSystem.Listener() {
+        @Override
+        public void onMessage(int from, int what, int arg1, int arg2) {
+            handleRobotSystemEvent(from, what, arg1, arg2);
         }
     };
 
@@ -167,6 +187,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        mCurrentOllamaRequestToken++;
+        mWaitingForOllama = false;
 
         if (mMainHandler != null && mMotorResetRunnable != null) {
             mMainHandler.removeCallbacks(mMotorResetRunnable);
@@ -190,6 +213,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 mConnectionStatus.setText("Status: Motors auto-reset after gesture");
             }
         };
+
+        registerRobotSystemListener();
     }
 
     private void initView() {
@@ -253,6 +278,233 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
             default:
                 break;
+        }
+    }
+
+    private void registerRobotSystemListener() {
+        try {
+            mRobotSystem = new RobotSystem();
+            int result = mRobotSystem.registerListener(mRobotSystemListener);
+            Log.i(TAG, "RobotSystem listener register result: " + result);
+        } catch (Exception e) {
+            Log.w(TAG, "RobotSystem listener registration failed", e);
+        }
+    }
+
+    private void handleRobotSystemEvent(final int from, final int what, final int arg1, final int arg2) {
+        Log.i(TAG, "RobotSystem event from=" + from + ", what=" + what + ", arg1=" + arg1 + ", arg2=" + arg2);
+
+        if (from != RobotSystem.CallbackCommand.RF_EVENT_TYPE) {
+            return;
+        }
+
+        if (what != RobotSystem.CallbackCommand.RF_EVENT_TOUCH) {
+            return;
+        }
+
+        if (arg1 == RobotSystem.CallbackCommand.RF_HEAD_TOUCH) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    handleHeadTouchStopOrCancel();
+                }
+            });
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+
+        if (now - mLastTouchReactionTimeMs < TOUCH_REACTION_COOLDOWN_MS) {
+            return;
+        }
+
+        mLastTouchReactionTimeMs = now;
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                reactToRobotTouch(what, arg1);
+            }
+        });
+    }
+
+    private void handleHeadTouchStopOrCancel() {
+        boolean stoppedSomething = false;
+
+        if (cancelPendingOllamaRequest()) {
+            stoppedSomething = true;
+        }
+
+        if (stopCurrentRobotSpeech()) {
+            stoppedSomething = true;
+        }
+
+        if (stopCurrentRobotListening()) {
+            stoppedSomething = true;
+        }
+
+        if (stoppedSomething) {
+            mConnectionStatus.setText("Status: Head touch stopped current action");
+            mResponse.setText("Head touch: stopped current speech/request.");
+            return;
+        }
+
+        mConnectionStatus.setText("Status: Head touch detected");
+        mResponse.setText("Touch event: Touch\nArea: head");
+    }
+
+    private boolean cancelPendingOllamaRequest() {
+        if (!mWaitingForOllama) {
+            return false;
+        }
+
+        mCurrentOllamaRequestToken++;
+        mWaitingForOllama = false;
+
+        return true;
+    }
+
+    private boolean stopCurrentRobotSpeech() {
+        if (mSpeechManager == null || mLastTtsRequestId < 0) {
+            return false;
+        }
+
+        try {
+            boolean stopped = mSpeechManager.stopSpeaking(mLastTtsRequestId);
+
+            if (stopped) {
+                mTtsStatus.setText("TTS Status: Stopped by head touch, requestId: " + mLastTtsRequestId);
+                mLastTtsRequestId = -1;
+            }
+
+            return stopped;
+
+        } catch (Exception e) {
+            Log.w(TAG, "stopSpeaking failed", e);
+            return false;
+        }
+    }
+
+    private boolean stopCurrentRobotListening() {
+        if (mSpeechManager == null) {
+            return false;
+        }
+
+        try {
+            if (mSpeechManager.isListening()) {
+                return mSpeechManager.stopListening();
+            }
+
+        } catch (Exception e) {
+            Log.w(TAG, "stopListening failed", e);
+        }
+
+        return false;
+    }
+    private void reactToRobotTouch(int touchType, int touchArea) {
+        String touchTypeName = getTouchTypeName(touchType);
+        String touchAreaName = getTouchAreaName(touchArea);
+        String speech = getTouchReactionSpeech(touchType, touchArea);
+
+        mConnectionStatus.setText("Status: " + touchTypeName + " detected: " + touchAreaName);
+        mResponse.setText("Touch event: " + touchTypeName + "\nArea: " + touchAreaName);
+
+        if (shouldUseCustomTouchReaction(touchArea) && canRunCustomTouchReactionNow()) {
+            showTouchReactionFace(touchArea);
+            speakText(speech);
+        }
+    }
+
+    private boolean canRunCustomTouchReactionNow() {
+        if (mWaitingForOllama) {
+            return false;
+        }
+
+        if (mSpeechManager != null && mSpeechManager.isSpeaking()) {
+            return false;
+        }
+
+        return true;
+    }
+    private boolean shouldUseCustomTouchReaction(int touchArea) {
+        return touchArea == RobotSystem.CallbackCommand.RF_LEFT_SHOULDER_TOUCH
+                || touchArea == RobotSystem.CallbackCommand.RF_RIGHT_SHOULDER_TOUCH;
+    }
+    private String getTouchTypeName(int touchType) {
+        if (touchType == RobotSystem.CallbackCommand.RF_EVENT_LONG_TOUCH) {
+            return "Long touch";
+        }
+
+        return "Touch";
+    }
+
+    private String getTouchAreaName(int touchArea) {
+        if (touchArea == RobotSystem.CallbackCommand.RF_HEAD_TOUCH) {
+            return "head";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_LEFT_SHOULDER_TOUCH) {
+            return "left shoulder";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_RIGHT_SHOULDER_TOUCH) {
+            return "right shoulder";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_LEFT_OXTER_TOUCH) {
+            return "left side";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_RIGHT_OXTER_TOUCH) {
+            return "right side";
+        }
+
+        return "unknown area " + touchArea;
+    }
+
+    private String getTouchReactionSpeech(int touchType, int touchArea) {
+        if (touchType == RobotSystem.CallbackCommand.RF_EVENT_LONG_TOUCH) {
+            return "Okay, I noticed the dramatic long touch.";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_HEAD_TOUCH) {
+            return "Careful with the genius hardware.";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_LEFT_SHOULDER_TOUCH
+                || touchArea == RobotSystem.CallbackCommand.RF_RIGHT_SHOULDER_TOUCH) {
+            return "Yes, yes, I felt that.";
+        }
+
+        if (touchArea == RobotSystem.CallbackCommand.RF_LEFT_OXTER_TOUCH
+                || touchArea == RobotSystem.CallbackCommand.RF_RIGHT_OXTER_TOUCH) {
+            return "Personal space, tiny human.";
+        }
+
+        return "Touch detected.";
+    }
+
+    private void showTouchReactionFace(int touchArea) {
+        if (mRobotMotion == null) {
+            return;
+        }
+
+        try {
+            if (touchArea == RobotSystem.CallbackCommand.RF_HEAD_TOUCH) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SURPRISE);
+                return;
+            }
+
+            if (touchArea == RobotSystem.CallbackCommand.RF_LEFT_OXTER_TOUCH
+                    || touchArea == RobotSystem.CallbackCommand.RF_RIGHT_OXTER_TOUCH) {
+                mRobotMotion.emoji(RobotMotion.Emoji.ANGRY);
+                return;
+            }
+
+            mRobotMotion.emoji(RobotMotion.Emoji.SMILE);
+
+        } catch (Exception e) {
+            Log.w(TAG, "Touch reaction face failed", e);
         }
     }
 
@@ -329,6 +581,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
             return;
         }
 
+        mCurrentOllamaRequestToken++;
+        mWaitingForOllama = true;
+        final int requestToken = mCurrentOllamaRequestToken;
+
         mConnectionStatus.setText("Status: Sending prompt to Ollama...");
         mResponse.setText("Thinking...");
         showThinkingFaceWhileWaiting();
@@ -336,7 +592,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
         final String requestServerUrl = getCleanServerUrl();
 
-        askOllama(userText, requestServerUrl);
+        askOllama(userText, requestServerUrl, requestToken);
     }
 
     private void showThinkingFaceWhileWaiting() {
@@ -351,7 +607,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 
-    private void askOllama(final String userText, final String requestServerUrl) {
+    private void askOllama(final String userText, final String requestServerUrl, final int requestToken) {
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -388,6 +644,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            if (!isCurrentOllamaRequest(requestToken)) {
+                                Log.i(TAG, "Ignoring stale Ollama response for token " + requestToken);
+                                return;
+                            }
+
+                            mWaitingForOllama = false;
                             handleRobotReplyOnUi(action, speech, responseWasRepaired);
                         }
                     });
@@ -398,6 +660,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            if (!isCurrentOllamaRequest(requestToken)) {
+                                Log.i(TAG, "Ignoring stale Ollama error for token " + requestToken);
+                                return;
+                            }
+
+                            mWaitingForOllama = false;
                             mConnectionStatus.setText("Status: Ollama request failed");
                             mResponse.setText("Error: " + e.getMessage());
                             Toast.makeText(MainActivity.this,
@@ -410,6 +678,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }).start();
     }
 
+    private boolean isCurrentOllamaRequest(int requestToken) {
+        return requestToken == mCurrentOllamaRequestToken;
+    }
     private void handleRobotReplyOnUi(String action, String speech, boolean responseWasRepaired) {
         boolean actionWasPerformed = performRobotAction(action);
 
@@ -1047,8 +1318,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
         if (!TextUtils.isEmpty(text)) {
             enableRobotTts();
-            mTtsStatus.setText("TTS Status: Speaking request sent");
-            mSpeechManager.startSpeaking(text);
+            mLastTtsRequestId = mSpeechManager.startSpeaking(text);
+            mTtsStatus.setText("TTS Status: Speaking request sent, requestId: " + mLastTtsRequestId);
         }
     }
 
@@ -1066,6 +1337,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
+
+
+
 
 
 
