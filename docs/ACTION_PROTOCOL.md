@@ -59,6 +59,38 @@ Good:
 | `right_arm_small_wave` | Small fixed right-arm wave preset, then auto-reset |
 | `left_arm_small_wave` | Small fixed left-arm wave preset, then auto-reset |
 | `both_arms_small_wave` | Small fixed both-arms wave preset, then auto-reset |
+| `clear_face` | Clear face expression |
+| `cover_smile` | Covered smile expression |
+| `doubt` | Doubtful or skeptical expression |
+| `eye_bind_one` | One-eye bind expression |
+| `eye_close` | Closed-eye expression |
+| `eye_open` | Open-eye expression |
+| `grimace` | Awkward or uncomfortable expression |
+| `hearted` | Heart/loving expression |
+| `indifferent` | Indifferent or unimpressed expression |
+| `laugh` | Laughing expression |
+| `listen` | Listening expression |
+| `naughty_face` | Naughty or playful expression |
+| `shh` | Quiet/shh expression |
+| `sleep` | Sleepy expression |
+| `surprise` | Shocked or surprised expression |
+| `talk` | Talking expression |
+| `thinking` | Thinking expression |
+| `wake_up` | Wake-up expression |
+
+## Waiting behavior
+
+When the user sends a prompt, the UI immediately changes the response area to `Thinking...` and the app shows the `RobotMotion.Emoji.THINKING` face.
+
+This waiting face is not chosen by the model. It is a local UI/robot feedback state that runs before the Ollama response is received.
+
+When the model response arrives, the validated final action replaces the waiting expression.
+
+## Expression and TTS behavior
+
+Face expressions use `RobotMotion.Emoji`.
+
+The selected expression can be visible only briefly because iPal's TTS mouth animation can override the face while the robot speaks. This is expected behavior for now. The action still counts as successful if the app selected the correct action and `RobotMotion.emoji(...)` ran.
 
 ## Execution rule
 
@@ -149,6 +181,8 @@ both_arms_small_wave
 
 The reset delay is controlled by `MOTOR_RESET_DELAY_MS`. A pending reset is cancelled before scheduling a new one. Manual `reset_motors` cancels any pending reset and resets immediately.
 
+Face/emoji actions do not schedule motor reset.
+
 ## JSON repair behavior
 
 The app uses a retry flow for malformed JSON:
@@ -208,7 +242,7 @@ To add a new action safely:
 5. Add the action name to `ALLOWED_ACTIONS_TEXT` if it is safe for the model to choose.
 6. Add the action to `isAllowedRobotAction(String action)`.
 7. Add a matching case in `performRobotAction(String action)`.
-8. Add the action to `shouldAutoResetAfterAction(String action)` if it should return to neutral automatically.
+8. Add the action to `shouldAutoResetAfterAction(String action)` only if it should return motors to neutral automatically.
 9. Add a default speech case to `getDefaultSpeechForAction(String action)` when useful.
 10. Build and install on the robot.
 11. Test with simple prompts.
@@ -221,6 +255,7 @@ Safe now:
 - Head nodding.
 - Head shaking.
 - Face/emoji expressions.
+- Thinking face while waiting for Ollama.
 - All-motor reset preset.
 - Small fixed right-arm wave preset with auto-reset.
 - Small fixed left-arm wave preset with auto-reset.
@@ -262,6 +297,45 @@ Expected:
 {
   "action": "smile",
   "speech": "I'm iPal, the tiny lab gremlin supervising this circus."
+}
+```
+
+```text
+Look surprised and say wow.
+```
+
+Expected:
+
+```json
+{
+  "action": "surprise",
+  "speech": "Wow."
+}
+```
+
+```text
+Make a thinking face and explain what a resistor does.
+```
+
+Expected:
+
+```json
+{
+  "action": "thinking",
+  "speech": "A resistor limits current flow in a circuit."
+}
+```
+
+```text
+Laugh at me and say hello.
+```
+
+Expected:
+
+```json
+{
+  "action": "laugh",
+  "speech": "Hello, tiny disaster."
 }
 ```
 
