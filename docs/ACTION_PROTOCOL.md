@@ -58,6 +58,7 @@ Good:
 | `reset_motors` | Reset all motors |
 | `right_arm_small_wave` | Small fixed right-arm wave preset |
 | `left_arm_small_wave` | Small fixed left-arm wave preset |
+| `both_arms_small_wave` | Small fixed both-arms wave preset |
 
 ## Execution rule
 
@@ -100,6 +101,15 @@ Also allowed:
 ```json
 {
   "action": "left_arm_small_wave",
+  "speech": "Hi there."
+}
+```
+
+Also allowed:
+
+```json
+{
+  "action": "both_arms_small_wave",
   "speech": "Hi there."
 }
 ```
@@ -190,6 +200,7 @@ Safe now:
 - All-motor reset preset.
 - Small fixed right-arm wave preset.
 - Small fixed left-arm wave preset.
+- Small fixed both-arms wave preset.
 
 Not enabled yet:
 
@@ -265,6 +276,19 @@ Expected:
 ```json
 {
   "action": "left_arm_small_wave",
+  "speech": "Hello."
+}
+```
+
+```text
+Wave with both arms and say hello.
+```
+
+Expected:
+
+```json
+{
+  "action": "both_arms_small_wave",
   "speech": "Hello."
 }
 ```
