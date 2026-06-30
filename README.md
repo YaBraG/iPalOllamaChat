@@ -11,6 +11,7 @@ The app can:
 - Connect to a local Ollama server over Wi-Fi.
 - Save the last-used Ollama server URL with Android `SharedPreferences`.
 - Send prompts to the `llama3.2:3b` model.
+- Show a `THINKING` face while waiting for Ollama to answer.
 - Force the model to return a JSON reply with an `action` and `speech` field.
 - Retry with a JSON repair prompt if the model returns malformed JSON.
 - Preserve a valid action even if the model accidentally returns empty speech, then fill in safe default speech.
@@ -52,8 +53,34 @@ Current safe action whitelist:
 | `right_arm_small_wave` | Small right-arm preset wave, then auto-reset |
 | `left_arm_small_wave` | Small left-arm preset wave, then auto-reset |
 | `both_arms_small_wave` | Small both-arms preset wave, then auto-reset |
+| `clear_face` | Clear face expression |
+| `cover_smile` | Covered smile expression |
+| `doubt` | Doubtful expression |
+| `eye_bind_one` | One-eye bind expression |
+| `eye_close` | Close eyes expression |
+| `eye_open` | Open eyes expression |
+| `grimace` | Grimace expression |
+| `hearted` | Heart/loving expression |
+| `indifferent` | Indifferent expression |
+| `laugh` | Laugh expression |
+| `listen` | Listening expression |
+| `naughty_face` | Naughty/playful expression |
+| `shh` | Quiet/shh expression |
+| `sleep` | Sleep expression |
+| `surprise` | Surprise expression |
+| `talk` | Talking expression |
+| `thinking` | Thinking expression |
+| `wake_up` | Wake-up expression |
 
 The model may choose an action, but the app only executes actions in this whitelist.
+
+## Face expression behavior
+
+The app uses `RobotMotion.Emoji` for face expressions. Extra safe built-in emoji actions were added after inspecting the SDK's known emoji constants.
+
+When the user sends a prompt, the app immediately shows the `THINKING` face while the UI says `Thinking...`. When Ollama returns a valid response, the selected action replaces that waiting expression.
+
+Known behavior: iPal's mouth animation during TTS can briefly override the selected face expression while the robot is speaking. This is expected for now and does not mean the action routing failed.
 
 ## Motor preset policy
 
@@ -71,6 +98,8 @@ Current motor presets:
 | `both_arms_small_wave` | Runs the tested right-arm and left-arm wave presets together |
 
 Arm gesture presets are followed by a centralized delayed reset. The app calls `performRobotAction(action)`, checks `shouldAutoResetAfterAction(action)`, and schedules `resetAllMotors()` after the configured delay. This keeps reset behavior out of the individual gesture blocks.
+
+Face/emoji actions do not schedule motor reset. Only arm gesture presets auto-reset.
 
 ## Code organization notes
 
@@ -181,6 +210,26 @@ Smile and introduce yourself.
 ```
 
 ```text
+Look surprised and say wow.
+```
+
+```text
+Make a thinking face and explain what a resistor does.
+```
+
+```text
+Laugh at me and say hello.
+```
+
+```text
+Look doubtful and say I do not trust that idea.
+```
+
+```text
+Make a sleepy face and say I need a nap.
+```
+
+```text
 Reset your motors and say done.
 ```
 
@@ -230,7 +279,8 @@ Ignored examples:
 - The default server URL is still hardcoded in `MainActivity.java`, but the user-entered URL is saved after use.
 - The app uses one-shot prompt/response calls, not a persistent conversation memory.
 - JSON repair improves reliability, but small local models may still occasionally produce unusable output.
-- Only safe head actions, face actions, and four tested motor presets are enabled.
+- Safe head actions, face/emoji actions, and tested motor presets are enabled.
+- TTS mouth animation can briefly override face expressions while the robot is speaking.
 - Arbitrary motor angles are intentionally not exposed to the model.
 - Wheel/base movement is intentionally not enabled yet.
 - Face recognition/NUI support is not implemented yet.
@@ -240,9 +290,9 @@ Ignored examples:
 
 Near-term:
 
-- Add more tested fixed motor presets after inspecting AvatarMind motion APIs.
 - Inspect NUI / face recognition APIs.
 - Add local MDC knowledge documents or retrieval.
+- Design constrained free-movement schema, but keep raw motion disabled until safety is understood.
 
 Later:
 
@@ -252,4 +302,4 @@ Later:
 
 ## Status
 
-Working prototype. Current milestone: local Ollama chat, JSON action routing, JSON repair retry, saved server URL, centralized motor auto-reset, safe motor presets, RobotMotion gestures, iPal TTS, and sassy lab-assistant personality.
+Working prototype. Current milestone: local Ollama chat, JSON action routing, JSON repair retry, saved server URL, centralized motor auto-reset, safe motor presets, expanded RobotMotion emoji actions, thinking face while waiting for Ollama, iPal TTS, and sassy lab-assistant personality.
