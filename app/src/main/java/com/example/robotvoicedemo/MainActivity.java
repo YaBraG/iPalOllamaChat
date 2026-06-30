@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.robot.hw.RobotDevices;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.robot.motion.RobotMotion;
 import android.robot.speech.SpeechManager;
 import android.robot.speech.SpeechManager.TtsListener;
@@ -36,6 +38,41 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String PREFS_NAME = "iPalOllamaChatPrefs";
     private static final String PREF_SERVER_URL = "server_url";
 
+    private static final int MOTOR_RESET_DELAY_MS = 2000;
+
+    private static final String ACTION_NONE = "none";
+    private static final String ACTION_NOD_HEAD = "nod_head";
+    private static final String ACTION_SHAKE_HEAD = "shake_head";
+    private static final String ACTION_SMILE = "smile";
+    private static final String ACTION_SAD = "sad";
+    private static final String ACTION_CRY = "cry";
+    private static final String ACTION_SHY = "shy";
+    private static final String ACTION_ANGRY = "angry";
+    private static final String ACTION_BLINK = "blink";
+    private static final String ACTION_FROWN = "frown";
+    private static final String ACTION_DEFAULT_FACE = "default_face";
+    private static final String ACTION_RESET_MOTORS = "reset_motors";
+    private static final String ACTION_RIGHT_ARM_SMALL_WAVE = "right_arm_small_wave";
+    private static final String ACTION_LEFT_ARM_SMALL_WAVE = "left_arm_small_wave";
+    private static final String ACTION_BOTH_ARMS_SMALL_WAVE = "both_arms_small_wave";
+
+    private static final String ALLOWED_ACTIONS_TEXT =
+            ACTION_NONE + ", "
+                    + ACTION_NOD_HEAD + ", "
+                    + ACTION_SHAKE_HEAD + ", "
+                    + ACTION_SMILE + ", "
+                    + ACTION_SAD + ", "
+                    + ACTION_CRY + ", "
+                    + ACTION_SHY + ", "
+                    + ACTION_ANGRY + ", "
+                    + ACTION_BLINK + ", "
+                    + ACTION_FROWN + ", "
+                    + ACTION_DEFAULT_FACE + ", "
+                    + ACTION_RESET_MOTORS + ", "
+                    + ACTION_RIGHT_ARM_SMALL_WAVE + ", "
+                    + ACTION_LEFT_ARM_SMALL_WAVE + ", "
+                    + ACTION_BOTH_ARMS_SMALL_WAVE;
+
     private ImageView mBtnBack;
 
     private EditText mServerUrl;
@@ -53,6 +90,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private InputMethodManager mInputMethodManager;
     private SpeechManager mSpeechManager;
     private RobotMotion mRobotMotion = new RobotMotion();
+
+    private Handler mMainHandler;
+    private Runnable mMotorResetRunnable;
 
     private String mLastResponse = "";
 
@@ -92,6 +132,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
     protected void onDestroy() {
         super.onDestroy();
 
+        if (mMainHandler != null && mMotorResetRunnable != null) {
+            mMainHandler.removeCallbacks(mMotorResetRunnable);
+        }
+
         if (mSpeechManager != null) {
             mSpeechManager.setTtsListener(null);
         }
@@ -101,6 +145,15 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mSpeechManager = (SpeechManager) getSystemService(SpeechService.SERVICE_NAME);
         mInputMethodManager = (InputMethodManager) getApplicationContext()
                 .getSystemService(Context.INPUT_METHOD_SERVICE);
+
+        mMainHandler = new Handler(Looper.getMainLooper());
+        mMotorResetRunnable = new Runnable() {
+            @Override
+            public void run() {
+                resetAllMotors();
+                mConnectionStatus.setText("Status: Motors auto-reset after gesture");
+            }
+        };
     }
 
     private void initView() {
@@ -286,16 +339,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            performRobotAction(action);
-
-                            mLastResponse = speech;
-                            mResponse.setText("Action: " + action + "\n\n" + speech);
-
-                            if (responseWasRepaired) {
-                                mConnectionStatus.setText("Status: Response repaired and received");
-                            }
-
-                            speakText(speech);
+                            handleRobotReplyOnUi(action, speech, responseWasRepaired);
                         }
                     });
 
@@ -317,10 +361,27 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }).start();
     }
 
+    private void handleRobotReplyOnUi(String action, String speech, boolean responseWasRepaired) {
+        boolean actionWasPerformed = performRobotAction(action);
+
+        if (actionWasPerformed && shouldAutoResetAfterAction(action)) {
+            scheduleMotorResetAfterGesture();
+        }
+
+        mLastResponse = speech;
+        mResponse.setText("Action: " + action + "\n\n" + speech);
+
+        if (responseWasRepaired) {
+            mConnectionStatus.setText("Status: Response repaired and received");
+        }
+
+        speakText(speech);
+    }
+
     private String buildRobotPrompt(String userText) {
         return "You are iPal, a small robot assistant in the MDC robotics lab. "
                 + "You can control your body using one allowed action. "
-                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave, left_arm_small_wave, both_arms_small_wave. "
+                + "Allowed actions are: " + ALLOWED_ACTIONS_TEXT + ". "
                 + "Choose exactly one action. "
                 + "Use nod_head for agreement, yes, approval, or understanding. "
                 + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
@@ -355,7 +416,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "The JSON must have exactly this format: "
                 + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
                 + "The speech field must never be empty. "
-                + "Allowed actions are: none, nod_head, shake_head, smile, sad, cry, shy, angry, blink, frown, default_face, reset_motors, right_arm_small_wave, left_arm_small_wave, both_arms_small_wave. "
+                + "Allowed actions are: " + ALLOWED_ACTIONS_TEXT + ". "
                 + "If the action is unclear, use none. "
                 + "If the speech is unclear, create a short spoken version from the broken reply. "
                 + "Broken reply: " + badResponse;
@@ -451,27 +512,31 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
         String safeAction = action.toLowerCase().trim();
 
-        if ("reset_motors".equals(safeAction)) {
+        if (ACTION_RESET_MOTORS.equals(safeAction)) {
             return "Done.";
         }
 
-        if ("right_arm_small_wave".equals(safeAction)) {
+        if (ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)) {
             return "Hello.";
         }
 
-        if ("left_arm_small_wave".equals(safeAction)) {
+        if (ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)) {
             return "Hello.";
         }
 
-        if ("nod_head".equals(safeAction)) {
+        if (ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)) {
+            return "Hello.";
+        }
+
+        if (ACTION_NOD_HEAD.equals(safeAction)) {
             return "Yes.";
         }
 
-        if ("shake_head".equals(safeAction)) {
+        if (ACTION_SHAKE_HEAD.equals(safeAction)) {
             return "No.";
         }
 
-        if ("smile".equals(safeAction)) {
+        if (ACTION_SMILE.equals(safeAction)) {
             return "Hello.";
         }
 
@@ -491,27 +556,31 @@ public class MainActivity extends Activity implements View.OnClickListener {
     }
 
     private boolean isAllowedRobotAction(String action) {
+        String safeAction = normalizeAction(action);
+
+        return ACTION_NONE.equals(safeAction)
+                || ACTION_NOD_HEAD.equals(safeAction)
+                || ACTION_SHAKE_HEAD.equals(safeAction)
+                || ACTION_SMILE.equals(safeAction)
+                || ACTION_SAD.equals(safeAction)
+                || ACTION_CRY.equals(safeAction)
+                || ACTION_SHY.equals(safeAction)
+                || ACTION_ANGRY.equals(safeAction)
+                || ACTION_BLINK.equals(safeAction)
+                || ACTION_FROWN.equals(safeAction)
+                || ACTION_DEFAULT_FACE.equals(safeAction)
+                || ACTION_RESET_MOTORS.equals(safeAction)
+                || ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
+                || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
+                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction);
+    }
+
+    private String normalizeAction(String action) {
         if (TextUtils.isEmpty(action)) {
-            return false;
+            return "";
         }
 
-        String safeAction = action.toLowerCase().trim();
-
-        return "none".equals(safeAction)
-                || "nod_head".equals(safeAction)
-                || "shake_head".equals(safeAction)
-                || "smile".equals(safeAction)
-                || "sad".equals(safeAction)
-                || "cry".equals(safeAction)
-                || "shy".equals(safeAction)
-                || "angry".equals(safeAction)
-                || "blink".equals(safeAction)
-                || "frown".equals(safeAction)
-                || "default_face".equals(safeAction)
-                || "reset_motors".equals(safeAction)
-                || "right_arm_small_wave".equals(safeAction)
-                || "left_arm_small_wave".equals(safeAction)
-                || "both_arms_small_wave".equals(safeAction);
+        return action.toLowerCase().trim();
     }
 
     private String extractJsonObject(String rawText) throws Exception {
@@ -548,108 +617,140 @@ public class MainActivity extends Activity implements View.OnClickListener {
         return cleaned.trim();
     }
 
-    private void performRobotAction(String action) {
-        if (TextUtils.isEmpty(action) || mRobotMotion == null) {
+    private boolean performRobotAction(String action) {
+        String safeAction = normalizeAction(action);
+
+        if (TextUtils.isEmpty(safeAction)) {
             mConnectionStatus.setText("Status: Response received");
-            return;
+            return false;
         }
 
-        String safeAction = action.toLowerCase().trim();
+        if (mRobotMotion == null) {
+            mConnectionStatus.setText("Status: RobotMotion not available");
+            return false;
+        }
 
         try {
-            if ("none".equals(safeAction)) {
+            if (ACTION_NONE.equals(safeAction)) {
                 mConnectionStatus.setText("Status: Response received");
-                return;
+                return false;
             }
 
-            if ("nod_head".equals(safeAction)) {
+            if (ACTION_NOD_HEAD.equals(safeAction)) {
                 mRobotMotion.nodHead();
                 mConnectionStatus.setText("Status: Action performed: nod head");
-                return;
+                return true;
             }
 
-            if ("shake_head".equals(safeAction)) {
+            if (ACTION_SHAKE_HEAD.equals(safeAction)) {
                 mRobotMotion.shakeHead();
                 mConnectionStatus.setText("Status: Action performed: shake head");
-                return;
+                return true;
             }
 
-            if ("smile".equals(safeAction)) {
+            if (ACTION_SMILE.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.SMILE);
                 mConnectionStatus.setText("Status: Action performed: smile");
-                return;
+                return true;
             }
 
-            if ("sad".equals(safeAction)) {
+            if (ACTION_SAD.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.SAD);
                 mConnectionStatus.setText("Status: Action performed: sad");
-                return;
+                return true;
             }
 
-            if ("cry".equals(safeAction)) {
+            if (ACTION_CRY.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.CRY);
                 mConnectionStatus.setText("Status: Action performed: cry");
-                return;
+                return true;
             }
 
-            if ("shy".equals(safeAction)) {
+            if (ACTION_SHY.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.SHY);
                 mConnectionStatus.setText("Status: Action performed: shy");
-                return;
+                return true;
             }
 
-            if ("angry".equals(safeAction)) {
+            if (ACTION_ANGRY.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.ANGRY);
                 mConnectionStatus.setText("Status: Action performed: angry");
-                return;
+                return true;
             }
 
-            if ("blink".equals(safeAction)) {
+            if (ACTION_BLINK.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.BLINK);
                 mConnectionStatus.setText("Status: Action performed: blink");
-                return;
+                return true;
             }
 
-            if ("frown".equals(safeAction)) {
+            if (ACTION_FROWN.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.FROWN);
                 mConnectionStatus.setText("Status: Action performed: frown");
-                return;
+                return true;
             }
 
-            if ("default_face".equals(safeAction)) {
+            if (ACTION_DEFAULT_FACE.equals(safeAction)) {
                 mRobotMotion.emoji(RobotMotion.Emoji.DEFAULT);
                 mConnectionStatus.setText("Status: Action performed: default face");
-                return;
+                return true;
             }
 
-            if ("reset_motors".equals(safeAction)) {
+            if (ACTION_RESET_MOTORS.equals(safeAction)) {
+                cancelScheduledMotorReset();
                 resetAllMotors();
                 mConnectionStatus.setText("Status: Action performed: reset motors");
-                return;
+                return true;
             }
 
-            if ("right_arm_small_wave".equals(safeAction)) {
+            if (ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)) {
                 rightArmSmallWave();
                 mConnectionStatus.setText("Status: Action performed: right arm small wave");
-                return;
+                return true;
             }
 
-            if ("left_arm_small_wave".equals(safeAction)) {
+            if (ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)) {
                 leftArmSmallWave();
                 mConnectionStatus.setText("Status: Action performed: left arm small wave");
-                return;
+                return true;
             }
 
-            if ("both_arms_small_wave".equals(safeAction)) {
+            if (ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)) {
                 bothArmsSmallWave();
                 mConnectionStatus.setText("Status: Action performed: both arms small wave");
-                return;
+                return true;
             }
+
             mConnectionStatus.setText("Status: Ignored unsafe/unknown action: " + safeAction);
+            return false;
 
         } catch (Exception e) {
             Log.e(TAG, "Robot action failed", e);
             mConnectionStatus.setText("Status: Action failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean shouldAutoResetAfterAction(String action) {
+        String safeAction = normalizeAction(action);
+
+        return ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
+                || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
+                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction);
+    }
+
+    private void scheduleMotorResetAfterGesture() {
+        if (mMainHandler == null || mMotorResetRunnable == null) {
+            return;
+        }
+
+        mMainHandler.removeCallbacks(mMotorResetRunnable);
+        mMainHandler.postDelayed(mMotorResetRunnable, MOTOR_RESET_DELAY_MS);
+    }
+
+    private void cancelScheduledMotorReset() {
+        if (mMainHandler != null && mMotorResetRunnable != null) {
+            mMainHandler.removeCallbacks(mMotorResetRunnable);
         }
     }
 
@@ -790,6 +891,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
 
 
 
