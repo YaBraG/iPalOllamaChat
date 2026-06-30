@@ -56,6 +56,7 @@ default_face
 reset_motors
 right_arm_small_wave
 left_arm_small_wave
+both_arms_small_wave
 ```
 
 The app should never blindly execute arbitrary model output. Any new action must be added to both:
@@ -111,12 +112,13 @@ Relevant behavior:
 
 ## Safe motor presets
 
-The app now includes three fixed motor preset actions.
+The app now includes four fixed motor preset actions.
 
 ```text
 reset_motors
 right_arm_small_wave
 left_arm_small_wave
+both_arms_small_wave
 ```
 
 These are intentionally high-level actions. The model does not choose motor IDs, raw angles, speeds, durations, or wheel movement.
@@ -147,6 +149,13 @@ Current left-arm preset behavior:
 mRobotMotion.startMotor((int) RobotDevices.Motors.ARM_SWING_LEFT, 15, 1000, 1);
 mRobotMotion.startMotor((int) RobotDevices.Motors.FOREARM_SWING_LEFT, 20, 1000, 1);
 mRobotMotion.startMotor((int) RobotDevices.Motors.WRIST_LEFT, 15, 1000, 1);
+```
+
+Current both-arms preset behavior:
+
+```java
+rightArmSmallWave();
+leftArmSmallWave();
 ```
 
 Do not expose arbitrary motor angles to the model until the physical pose safety, range behavior, and reset behavior are better understood.
@@ -209,6 +218,10 @@ Runs the fixed right-arm wave preset using small internal motor angles.
 ### `leftArmSmallWave()`
 
 Runs the fixed left-arm wave preset using small internal motor angles.
+
+### `bothArmsSmallWave()`
+
+Runs the fixed both-arms wave preset by calling the tested right-arm and left-arm wave presets together.
 
 ### `speakText(String text)`
 
