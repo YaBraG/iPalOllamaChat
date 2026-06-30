@@ -16,6 +16,8 @@ This document captures the current working setup for the iPal Ollama Chat app.
 User prompt
   -> Android app
   -> App captures/normalizes server URL on the UI thread
+  -> App sets UI response text to Thinking...
+  -> App shows RobotMotion.Emoji.THINKING while waiting
   -> Background thread sends prompt to Ollama /api/generate
   -> Local model returns JSON
   -> App strict-parses action + speech
@@ -30,9 +32,11 @@ User prompt
 
 The robot action and spoken text are separated intentionally. The model decides what action fits the answer, but the Android app decides whether that action is safe and allowed.
 
+The waiting `THINKING` face is local feedback only. It is not chosen by the model.
+
 ## Action constants
 
-The app now centralizes robot action names as constants:
+The app centralizes robot action names as constants:
 
 ```java
 private static final String ACTION_NONE = "none";
@@ -50,6 +54,24 @@ private static final String ACTION_RESET_MOTORS = "reset_motors";
 private static final String ACTION_RIGHT_ARM_SMALL_WAVE = "right_arm_small_wave";
 private static final String ACTION_LEFT_ARM_SMALL_WAVE = "left_arm_small_wave";
 private static final String ACTION_BOTH_ARMS_SMALL_WAVE = "both_arms_small_wave";
+private static final String ACTION_CLEAR_FACE = "clear_face";
+private static final String ACTION_COVER_SMILE = "cover_smile";
+private static final String ACTION_DOUBT = "doubt";
+private static final String ACTION_EYE_BIND_ONE = "eye_bind_one";
+private static final String ACTION_EYE_CLOSE = "eye_close";
+private static final String ACTION_EYE_OPEN = "eye_open";
+private static final String ACTION_GRIMACE = "grimace";
+private static final String ACTION_HEARTED = "hearted";
+private static final String ACTION_INDIFFERENT = "indifferent";
+private static final String ACTION_LAUGH = "laugh";
+private static final String ACTION_LISTEN = "listen";
+private static final String ACTION_NAUGHTY_FACE = "naughty_face";
+private static final String ACTION_SHH = "shh";
+private static final String ACTION_SLEEP = "sleep";
+private static final String ACTION_SURPRISE = "surprise";
+private static final String ACTION_TALK = "talk";
+private static final String ACTION_THINKING = "thinking";
+private static final String ACTION_WAKE_UP = "wake_up";
 ```
 
 The `ALLOWED_ACTIONS_TEXT` string is built from those constants and reused by both the normal prompt and JSON repair prompt.
@@ -83,6 +105,24 @@ reset_motors
 right_arm_small_wave
 left_arm_small_wave
 both_arms_small_wave
+clear_face
+cover_smile
+doubt
+eye_bind_one
+eye_close
+eye_open
+grimace
+hearted
+indifferent
+laugh
+listen
+naughty_face
+shh
+sleep
+surprise
+talk
+thinking
+wake_up
 ```
 
 The app should never blindly execute arbitrary model output. Any new action must be added to:
@@ -91,8 +131,68 @@ The app should never blindly execute arbitrary model output. Any new action must
 2. `ALLOWED_ACTIONS_TEXT` if it is safe for the model to choose.
 3. `isAllowedRobotAction(String action)`.
 4. `performRobotAction(String action)`.
-5. `shouldAutoResetAfterAction(String action)` if the action should return to neutral automatically.
+5. `shouldAutoResetAfterAction(String action)` only if the action should return motors to neutral automatically.
 6. `getDefaultSpeechForAction(String action)` when useful.
+
+## RobotMotion method findings
+
+`RobotMotion` exposes a small group of high-level methods and raw movement methods.
+
+Safe/high-level methods currently used:
+
+```text
+nodHead()
+shakeHead()
+emoji(int)
+reset(int)
+startMotor(...) only through fixed app-owned presets
+```
+
+Not directly exposed to the model yet:
+
+```text
+doAction(...)
+startMotor(...) with raw model-selected values
+startWalk(...)
+stopWalk(...)
+turn(...)
+setEmoji(...)
+```
+
+The model does not choose raw motion parameters.
+
+## Face and emoji actions
+
+Face actions use `mRobotMotion.emoji(...)` with `RobotMotion.Emoji` constants.
+
+Extra safe built-in emoji actions are grouped through:
+
+```java
+isAdditionalFaceEmojiAction(String safeAction)
+performAdditionalFaceEmojiAction(String safeAction)
+playEmoji(int emoji, String statusName)
+```
+
+Known behavior: selected face expressions may only appear briefly because iPal's TTS mouth animation can override the face while speech is playing.
+
+## Thinking face while waiting
+
+`askIpal()` updates the UI and shows a local thinking face before sending the request to Ollama:
+
+```java
+mConnectionStatus.setText("Status: Sending prompt to Ollama...");
+mResponse.setText("Thinking...");
+showThinkingFaceWhileWaiting();
+mTtsStatus.setText("TTS Status: Waiting for response");
+```
+
+`showThinkingFaceWhileWaiting()` calls:
+
+```java
+mRobotMotion.emoji(RobotMotion.Emoji.THINKING);
+```
+
+This gives the robot visible feedback during the waiting window before the model response is available.
 
 ## JSON repair behavior
 
@@ -202,15 +302,17 @@ handleRobotReplyOnUi(action, speech, responseWasRepaired)
        scheduleMotorResetAfterGesture()
 ```
 
-`performRobotAction(String action)` now returns `true` only when a known action actually ran. This prevents auto-reset from being scheduled for unknown or ignored actions.
+`performRobotAction(String action)` returns `true` only when a known action actually ran. This prevents auto-reset from being scheduled for unknown or ignored actions.
 
-`shouldAutoResetAfterAction(String action)` currently returns `true` for:
+`shouldAutoResetAfterAction(String action)` currently returns `true` only for:
 
 ```text
 right_arm_small_wave
 left_arm_small_wave
 both_arms_small_wave
 ```
+
+Face/emoji actions do not auto-reset motors.
 
 `reset_motors` cancels any pending motor reset before resetting immediately.
 
@@ -229,7 +331,11 @@ Current behavior:
 
 ### `askIpal()`
 
-Reads the user prompt from the UI, updates status labels, captures the cleaned server URL on the UI thread, and calls `askOllama(userText, requestServerUrl)`.
+Reads the user prompt from the UI, updates status labels, shows the waiting thinking face, captures the cleaned server URL on the UI thread, and calls `askOllama(userText, requestServerUrl)`.
+
+### `showThinkingFaceWhileWaiting()`
+
+Displays `RobotMotion.Emoji.THINKING` while waiting for the Ollama response.
 
 ### `askOllama(String userText, String requestServerUrl)`
 
@@ -253,7 +359,7 @@ Extracts a JSON object and validates that `action` is present and whitelisted. I
 
 ### `getDefaultSpeechForAction(String action)`
 
-Returns short safe speech such as `Done.`, `Hello.`, `Yes.`, or `No.` when the model returns a valid action but empty speech.
+Returns short safe speech such as `Done.`, `Hello.`, `Yes.`, `No.`, or `Okay.` when the model returns a valid action but empty speech.
 
 ### `buildJsonRepairPrompt(String badResponse)`
 
@@ -263,13 +369,29 @@ Builds the second-chance prompt used when the first model response is not valid 
 
 Creates a safe fallback with `action: none` and a cleaned speech string when JSON repair fails.
 
+### `isAllowedRobotAction(String action)`
+
+Checks the action whitelist used during strict parsing.
+
+### `isAdditionalFaceEmojiAction(String safeAction)`
+
+Groups the extra safe `RobotMotion.Emoji` action names.
+
+### `performAdditionalFaceEmojiAction(String safeAction)`
+
+Maps extra safe emoji action names to SDK emoji constants.
+
+### `playEmoji(int emoji, String statusName)`
+
+Runs `mRobotMotion.emoji(emoji)`, updates UI status, and returns `true`.
+
 ### `performRobotAction(String action)`
 
 Validates the requested action, calls the matching safe `RobotMotion` API, and returns whether an action actually ran.
 
 ### `shouldAutoResetAfterAction(String action)`
 
-Returns whether the completed action should schedule a delayed motor reset.
+Returns whether the completed action should schedule a delayed motor reset. This is currently limited to arm gesture presets only.
 
 ### `scheduleMotorResetAfterGesture()`
 
@@ -378,8 +500,8 @@ Do not commit:
 
 Recommended order:
 
-1. Add more fixed safe motor presets from AvatarMind motion demos.
-2. Inspect NUI / face recognition APIs.
-3. Add local MDC knowledge documents.
+1. Inspect NUI / face recognition APIs.
+2. Add local MDC knowledge documents.
+3. Design a constrained free-movement schema.
 4. Add speech input.
 5. Add safe movement only after wheel APIs and obstacle behavior are fully understood.
