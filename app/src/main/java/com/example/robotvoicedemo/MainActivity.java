@@ -89,7 +89,25 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     + ACTION_RESET_MOTORS + ", "
                     + ACTION_RIGHT_ARM_SMALL_WAVE + ", "
                     + ACTION_LEFT_ARM_SMALL_WAVE + ", "
-                    + ACTION_BOTH_ARMS_SMALL_WAVE;
+                    + ACTION_BOTH_ARMS_SMALL_WAVE + ", "
+                    + ACTION_CLEAR_FACE + ", "
+                    + ACTION_COVER_SMILE + ", "
+                    + ACTION_DOUBT + ", "
+                    + ACTION_EYE_BIND_ONE + ", "
+                    + ACTION_EYE_CLOSE + ", "
+                    + ACTION_EYE_OPEN + ", "
+                    + ACTION_GRIMACE + ", "
+                    + ACTION_HEARTED + ", "
+                    + ACTION_INDIFFERENT + ", "
+                    + ACTION_LAUGH + ", "
+                    + ACTION_LISTEN + ", "
+                    + ACTION_NAUGHTY_FACE + ", "
+                    + ACTION_SHH + ", "
+                    + ACTION_SLEEP + ", "
+                    + ACTION_SURPRISE + ", "
+                    + ACTION_TALK + ", "
+                    + ACTION_THINKING + ", "
+                    + ACTION_WAKE_UP;
 
     private ImageView mBtnBack;
 
@@ -893,8 +911,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
         return ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
                 || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)
-                || isAdditionalFaceEmojiAction(safeAction);
+                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction);
     }
 
     private void scheduleMotorResetAfterGesture() {
@@ -1049,6 +1066,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
+
 
 
 
