@@ -56,9 +56,9 @@ Good:
 | `frown` | Frown expression |
 | `default_face` | Reset/default face |
 | `reset_motors` | Reset all motors |
-| `right_arm_small_wave` | Small fixed right-arm wave preset |
-| `left_arm_small_wave` | Small fixed left-arm wave preset |
-| `both_arms_small_wave` | Small fixed both-arms wave preset |
+| `right_arm_small_wave` | Small fixed right-arm wave preset, then auto-reset |
+| `left_arm_small_wave` | Small fixed left-arm wave preset, then auto-reset |
+| `both_arms_small_wave` | Small fixed both-arms wave preset, then auto-reset |
 
 ## Execution rule
 
@@ -127,6 +127,28 @@ Not allowed:
 
 The model does not choose motor IDs, angles, speed, duration, wheel distance, or turn angle. The app owns those values internally.
 
+## Centralized motor auto-reset
+
+Auto-reset is controlled by the app, not by the model.
+
+The model still chooses exactly one action. After that, the app does this:
+
+```text
+performRobotAction(action)
+if action ran and shouldAutoResetAfterAction(action):
+  scheduleMotorResetAfterGesture()
+```
+
+Current auto-reset actions:
+
+```text
+right_arm_small_wave
+left_arm_small_wave
+both_arms_small_wave
+```
+
+The reset delay is controlled by `MOTOR_RESET_DELAY_MS`. A pending reset is cancelled before scheduling a new one. Manual `reset_motors` cancels any pending reset and resets immediately.
+
 ## JSON repair behavior
 
 The app uses a retry flow for malformed JSON:
@@ -182,13 +204,15 @@ To add a new action safely:
 1. Confirm the AvatarMind robot API call exists.
 2. Test the action in a small isolated demo first.
 3. Use a fixed preset name, not raw motor parameters.
-4. Add the action name to the prompt's allowed action list.
-5. Add the action name to `isAllowedRobotAction(String action)`.
-6. Add a matching case in `performRobotAction(String action)`.
-7. Add a default speech case to `getDefaultSpeechForAction(String action)` when useful.
-8. Build and install on the robot.
-9. Test with simple prompts.
-10. Commit only after the robot action works reliably.
+4. Add a constant for the action.
+5. Add the action name to `ALLOWED_ACTIONS_TEXT` if it is safe for the model to choose.
+6. Add the action to `isAllowedRobotAction(String action)`.
+7. Add a matching case in `performRobotAction(String action)`.
+8. Add the action to `shouldAutoResetAfterAction(String action)` if it should return to neutral automatically.
+9. Add a default speech case to `getDefaultSpeechForAction(String action)` when useful.
+10. Build and install on the robot.
+11. Test with simple prompts.
+12. Commit only after the robot action works reliably.
 
 ## Current safety policy
 
@@ -198,9 +222,9 @@ Safe now:
 - Head shaking.
 - Face/emoji expressions.
 - All-motor reset preset.
-- Small fixed right-arm wave preset.
-- Small fixed left-arm wave preset.
-- Small fixed both-arms wave preset.
+- Small fixed right-arm wave preset with auto-reset.
+- Small fixed left-arm wave preset with auto-reset.
+- Small fixed both-arms wave preset with auto-reset.
 
 Not enabled yet:
 
@@ -292,6 +316,8 @@ Expected:
   "speech": "Hello."
 }
 ```
+
+After any arm-wave preset, the robot should automatically reset motors after the configured delay.
 
 ```text
 What is Miami Dade College?
