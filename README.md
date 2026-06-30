@@ -50,6 +50,7 @@ Current safe action whitelist:
 | `reset_motors` | Reset all motors |
 | `right_arm_small_wave` | Small right-arm preset wave |
 | `left_arm_small_wave` | Small left-arm preset wave |
+| `both_arms_small_wave` | Small both-arms preset wave |
 
 The model may choose an action, but the app only executes actions in this whitelist.
 
@@ -66,6 +67,7 @@ Current motor presets:
 | `reset_motors` | Calls `mRobotMotion.reset((int) RobotDevices.Units.ALL_MOTORS)` |
 | `right_arm_small_wave` | Moves the right arm, forearm, and wrist with small fixed angles |
 | `left_arm_small_wave` | Moves the left arm, forearm, and wrist with small fixed angles |
+| `both_arms_small_wave` | Runs the tested right-arm and left-arm wave presets together |
 
 ## JSON reliability
 
@@ -182,6 +184,10 @@ Wave with your left arm and say hello.
 ```
 
 ```text
+Wave with both arms and say hello.
+```
+
+```text
 What is Miami Dade College?
 ```
 
@@ -215,7 +221,7 @@ Ignored examples:
 - The default server URL is still hardcoded in `MainActivity.java`, but the user-entered URL is saved after use.
 - The app uses one-shot prompt/response calls, not a persistent conversation memory.
 - JSON repair improves reliability, but small local models may still occasionally produce unusable output.
-- Only safe head actions, face actions, and three tested motor presets are enabled.
+- Only safe head actions, face actions, and four tested motor presets are enabled.
 - Arbitrary motor angles are intentionally not exposed to the model.
 - Wheel/base movement is intentionally not enabled yet.
 - Face recognition/NUI support is not implemented yet.
