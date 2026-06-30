@@ -55,6 +55,24 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String ACTION_RIGHT_ARM_SMALL_WAVE = "right_arm_small_wave";
     private static final String ACTION_LEFT_ARM_SMALL_WAVE = "left_arm_small_wave";
     private static final String ACTION_BOTH_ARMS_SMALL_WAVE = "both_arms_small_wave";
+    private static final String ACTION_CLEAR_FACE = "clear_face";
+    private static final String ACTION_COVER_SMILE = "cover_smile";
+    private static final String ACTION_DOUBT = "doubt";
+    private static final String ACTION_EYE_BIND_ONE = "eye_bind_one";
+    private static final String ACTION_EYE_CLOSE = "eye_close";
+    private static final String ACTION_EYE_OPEN = "eye_open";
+    private static final String ACTION_GRIMACE = "grimace";
+    private static final String ACTION_HEARTED = "hearted";
+    private static final String ACTION_INDIFFERENT = "indifferent";
+    private static final String ACTION_LAUGH = "laugh";
+    private static final String ACTION_LISTEN = "listen";
+    private static final String ACTION_NAUGHTY_FACE = "naughty_face";
+    private static final String ACTION_SHH = "shh";
+    private static final String ACTION_SLEEP = "sleep";
+    private static final String ACTION_SURPRISE = "surprise";
+    private static final String ACTION_TALK = "talk";
+    private static final String ACTION_THINKING = "thinking";
+    private static final String ACTION_WAKE_UP = "wake_up";
 
     private static final String ALLOWED_ACTIONS_TEXT =
             ACTION_NONE + ", "
@@ -295,11 +313,24 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
         mConnectionStatus.setText("Status: Sending prompt to Ollama...");
         mResponse.setText("Thinking...");
+        showThinkingFaceWhileWaiting();
         mTtsStatus.setText("TTS Status: Waiting for response");
 
         final String requestServerUrl = getCleanServerUrl();
 
         askOllama(userText, requestServerUrl);
+    }
+
+    private void showThinkingFaceWhileWaiting() {
+        if (mRobotMotion == null) {
+            return;
+        }
+
+        try {
+            mRobotMotion.emoji(RobotMotion.Emoji.THINKING);
+        } catch (Exception e) {
+            Log.w(TAG, "Thinking face failed", e);
+        }
     }
 
     private void askOllama(final String userText, final String requestServerUrl) {
@@ -386,6 +417,20 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "Use nod_head for agreement, yes, approval, or understanding. "
                 + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
                 + "Use smile for happy, friendly, greeting, or joking responses. "
+                + "Use laugh for laughing, joking, teasing, or amused responses. "
+                + "Use surprise for shocked, impressed, or dramatic reactions. "
+                + "Use thinking for thinking, explaining, analyzing, or uncertain responses. "
+                + "Use doubt for skeptical, doubtful, or suspicious responses. "
+                + "Use grimace for awkward, uncomfortable, or embarrassing responses. "
+                + "Use indifferent for neutral, bored, unimpressed, or deadpan responses. "
+                + "Use hearted for appreciation, gratitude, or friendly affection. "
+                + "Use listen when you are listening or asking the user to continue. "
+                + "Use talk when giving a direct spoken explanation. "
+                + "Use shh when telling the user to be quiet or keep something quiet. "
+                + "Use sleep when acting tired or sleepy. "
+                + "Use wake_up when acting alert or waking up. "
+                + "Use cover_smile for shy, embarrassed, or playful smiling. "
+                + "Use eye_close, eye_open, eye_bind_one, clear_face, and naughty_face only when they clearly fit the response. "
                 + "Use angry only for playful fake anger, not real threats. "
                 + "Use none when no movement is needed. "
                 + "Use right_arm_small_wave when the user asks you to wave with your right arm, greet with your right arm, show off with your right arm, or make a small right-arm gesture. "
@@ -540,6 +585,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
             return "Hello.";
         }
 
+        if (isAdditionalFaceEmojiAction(safeAction)) {
+            return "Okay.";
+        }
+
         return "Done.";
     }
 
@@ -572,7 +621,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 || ACTION_RESET_MOTORS.equals(safeAction)
                 || ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
                 || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction);
+                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)
+                || isAdditionalFaceEmojiAction(safeAction);
     }
 
     private String normalizeAction(String action) {
@@ -696,6 +746,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 return true;
             }
 
+            if (performAdditionalFaceEmojiAction(safeAction)) {
+                return true;
+            }
+
             if (ACTION_RESET_MOTORS.equals(safeAction)) {
                 cancelScheduledMotorReset();
                 resetAllMotors();
@@ -731,12 +785,116 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 
+    private boolean isAdditionalFaceEmojiAction(String safeAction) {
+        return ACTION_CLEAR_FACE.equals(safeAction)
+                || ACTION_COVER_SMILE.equals(safeAction)
+                || ACTION_DOUBT.equals(safeAction)
+                || ACTION_EYE_BIND_ONE.equals(safeAction)
+                || ACTION_EYE_CLOSE.equals(safeAction)
+                || ACTION_EYE_OPEN.equals(safeAction)
+                || ACTION_GRIMACE.equals(safeAction)
+                || ACTION_HEARTED.equals(safeAction)
+                || ACTION_INDIFFERENT.equals(safeAction)
+                || ACTION_LAUGH.equals(safeAction)
+                || ACTION_LISTEN.equals(safeAction)
+                || ACTION_NAUGHTY_FACE.equals(safeAction)
+                || ACTION_SHH.equals(safeAction)
+                || ACTION_SLEEP.equals(safeAction)
+                || ACTION_SURPRISE.equals(safeAction)
+                || ACTION_TALK.equals(safeAction)
+                || ACTION_THINKING.equals(safeAction)
+                || ACTION_WAKE_UP.equals(safeAction);
+    }
+
+    private boolean performAdditionalFaceEmojiAction(String safeAction) {
+        if (ACTION_CLEAR_FACE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.CLEAR, "clear face");
+        }
+
+        if (ACTION_COVER_SMILE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.COVER_SMILE, "cover smile");
+        }
+
+        if (ACTION_DOUBT.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.DOUBT, "doubt");
+        }
+
+        if (ACTION_EYE_BIND_ONE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.EYEBINDONE, "eye bind one");
+        }
+
+        if (ACTION_EYE_CLOSE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.EYECLOSE, "eye close");
+        }
+
+        if (ACTION_EYE_OPEN.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.EYEOPEN, "eye open");
+        }
+
+        if (ACTION_GRIMACE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.GRIMACE, "grimace");
+        }
+
+        if (ACTION_HEARTED.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.HEARTED, "hearted");
+        }
+
+        if (ACTION_INDIFFERENT.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.INDIFFERENT, "indifferent");
+        }
+
+        if (ACTION_LAUGH.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.LAUGH, "laugh");
+        }
+
+        if (ACTION_LISTEN.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.LISTEN, "listen");
+        }
+
+        if (ACTION_NAUGHTY_FACE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.NAUGHTY, "naughty face");
+        }
+
+        if (ACTION_SHH.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.SHH, "shh");
+        }
+
+        if (ACTION_SLEEP.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.SLEEP, "sleep");
+        }
+
+        if (ACTION_SURPRISE.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.SURPRISE, "surprise");
+        }
+
+        if (ACTION_TALK.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.TALK, "talk");
+        }
+
+        if (ACTION_THINKING.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.THINKING, "thinking");
+        }
+
+        if (ACTION_WAKE_UP.equals(safeAction)) {
+            return playEmoji(RobotMotion.Emoji.WAKE_UP, "wake up");
+        }
+
+        return false;
+    }
+
+    private boolean playEmoji(int emoji, String statusName) {
+        mRobotMotion.emoji(emoji);
+        mConnectionStatus.setText("Status: Action performed: " + statusName);
+        return true;
+    }
+
     private boolean shouldAutoResetAfterAction(String action) {
         String safeAction = normalizeAction(action);
 
         return ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
                 || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction);
+                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)
+                || isAdditionalFaceEmojiAction(safeAction);
     }
 
     private void scheduleMotorResetAfterGesture() {
@@ -891,6 +1049,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
 
 
 
