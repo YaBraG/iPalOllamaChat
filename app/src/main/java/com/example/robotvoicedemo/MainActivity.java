@@ -39,7 +39,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String PREFS_NAME = "iPalOllamaChatPrefs";
     private static final String PREF_SERVER_URL = "server_url";
 
-    private static final int MOTOR_RESET_DELAY_MS = 2000;
+    private static final int DEFAULT_ARM_MOVE_DURATION_MS = 2500;
+    private static final int DEFAULT_ARM_HOLD_DURATION_MS = 4000;
     private static final long TOUCH_REACTION_COOLDOWN_MS = 2500;
 
     private static final String ACTION_NONE = "none";
@@ -54,9 +55,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String ACTION_FROWN = "frown";
     private static final String ACTION_DEFAULT_FACE = "default_face";
     private static final String ACTION_RESET_MOTORS = "reset_motors";
-    private static final String ACTION_RIGHT_ARM_SMALL_WAVE = "right_arm_small_wave";
-    private static final String ACTION_LEFT_ARM_SMALL_WAVE = "left_arm_small_wave";
-    private static final String ACTION_BOTH_ARMS_SMALL_WAVE = "both_arms_small_wave";
+    private static final String ACTION_CUSTOM_ARM_POSE = "custom_arm_pose";
     private static final String ACTION_CLEAR_FACE = "clear_face";
     private static final String ACTION_COVER_SMILE = "cover_smile";
     private static final String ACTION_DOUBT = "doubt";
@@ -89,9 +88,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     + ACTION_FROWN + ", "
                     + ACTION_DEFAULT_FACE + ", "
                     + ACTION_RESET_MOTORS + ", "
-                    + ACTION_RIGHT_ARM_SMALL_WAVE + ", "
-                    + ACTION_LEFT_ARM_SMALL_WAVE + ", "
-                    + ACTION_BOTH_ARMS_SMALL_WAVE + ", "
+                    + ACTION_CUSTOM_ARM_POSE + ", "
                     + ACTION_CLEAR_FACE + ", "
                     + ACTION_COVER_SMILE + ", "
                     + ACTION_DOUBT + ", "
@@ -120,6 +117,18 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private TextView mResponse;
     private TextView mTtsStatus;
 
+    private TextView mLeftArmRotation;
+    private TextView mLeftArmSwing;
+    private TextView mLeftForearmRotation;
+    private TextView mLeftForearmSwing;
+    private TextView mLeftWrist;
+
+    private TextView mRightArmRotation;
+    private TextView mRightArmSwing;
+    private TextView mRightForearmRotation;
+    private TextView mRightForearmSwing;
+    private TextView mRightWrist;
+
     private Button mBtnTestConnection;
     private Button mBtnAskIpal;
     private Button mBtnClear;
@@ -133,6 +142,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private Handler mMainHandler;
     private Runnable mMotorResetRunnable;
+    private Runnable mMotorStatusPollingRunnable;
+
+    private static final int MOTOR_STATUS_POLL_INTERVAL_MS = 1000;
 
     private String mLastResponse = "";
     private long mLastTouchReactionTimeMs = 0;
@@ -193,10 +205,14 @@ public class MainActivity extends Activity implements View.OnClickListener {
         } else {
             mVisionEventBridge.resume();
         }
+
+        startMotorStatusPolling();
     }
 
     @Override
     protected void onPause() {
+        stopMotorStatusPolling();
+
         if (mVisionEventBridge != null) {
             mVisionEventBridge.pause();
         }
@@ -221,6 +237,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
             mMainHandler.removeCallbacks(mMotorResetRunnable);
         }
 
+        if (mMainHandler != null && mMotorStatusPollingRunnable != null) {
+            mMainHandler.removeCallbacks(mMotorStatusPollingRunnable);
+        }
+
         if (mSpeechManager != null) {
             mSpeechManager.setTtsListener(null);
         }
@@ -240,6 +260,17 @@ public class MainActivity extends Activity implements View.OnClickListener {
             }
         };
 
+        mMotorStatusPollingRunnable = new Runnable() {
+            @Override
+            public void run() {
+                readAllArmMotorStatuses();
+
+                if (mMainHandler != null) {
+                    mMainHandler.postDelayed(this, MOTOR_STATUS_POLL_INTERVAL_MS);
+                }
+            }
+        };
+
         registerRobotSystemListener();
         initVisionEventBridge();
     }
@@ -253,6 +284,18 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mConnectionStatus = (TextView) findViewById(R.id.tv_connection_status);
         mResponse = (TextView) findViewById(R.id.tv_response);
         mTtsStatus = (TextView) findViewById(R.id.tv_tts_status);
+
+        mLeftArmRotation = (TextView) findViewById(R.id.tv_left_arm_rotation);
+        mLeftArmSwing = (TextView) findViewById(R.id.tv_left_arm_swing);
+        mLeftForearmRotation = (TextView) findViewById(R.id.tv_left_forearm_rotation);
+        mLeftForearmSwing = (TextView) findViewById(R.id.tv_left_forearm_swing);
+        mLeftWrist = (TextView) findViewById(R.id.tv_left_wrist);
+
+        mRightArmRotation = (TextView) findViewById(R.id.tv_right_arm_rotation);
+        mRightArmSwing = (TextView) findViewById(R.id.tv_right_arm_swing);
+        mRightForearmRotation = (TextView) findViewById(R.id.tv_right_forearm_rotation);
+        mRightForearmSwing = (TextView) findViewById(R.id.tv_right_forearm_swing);
+        mRightWrist = (TextView) findViewById(R.id.tv_right_wrist);
 
         mBtnTestConnection = (Button) findViewById(R.id.btn_test_connection);
         mBtnAskIpal = (Button) findViewById(R.id.btn_ask_ipal);
@@ -673,9 +716,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                         }
                     }
 
-                    final String action = robotReply.optString("action", "none").trim();
-                    final String speech = robotReply.optString("speech",
-                            "I got confused. Very impressive, honestly.").trim();
+                    final JSONObject finalRobotReply = robotReply;
                     final boolean responseWasRepaired = wasRepaired;
 
                     runOnUiThread(new Runnable() {
@@ -687,7 +728,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                             }
 
                             mWaitingForOllama = false;
-                            handleRobotReplyOnUi(action, speech, responseWasRepaired);
+                            handleRobotReplyOnUi(finalRobotReply, responseWasRepaired);
                         }
                     });
 
@@ -718,18 +759,62 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private boolean isCurrentOllamaRequest(int requestToken) {
         return requestToken == mCurrentOllamaRequestToken;
     }
-    private void handleRobotReplyOnUi(String action, String speech, boolean responseWasRepaired) {
-        boolean actionWasPerformed = performRobotAction(action);
+    private void handleRobotReplyOnUi(JSONObject robotReply, boolean responseWasRepaired) {
+        String action = robotReply.optString("action", ACTION_NONE).trim();
+        String speech = robotReply.optString(
+                "speech",
+                "I got confused. Very impressive, honestly."
+        ).trim();
 
-        if (actionWasPerformed && shouldAutoResetAfterAction(action)) {
-            scheduleMotorResetAfterGesture();
-        }
+        boolean actionWasPerformed = performRobotAction(robotReply);
 
         mLastResponse = speech;
-        mResponse.setText("Action: " + action + "\n\n" + speech);
+
+        StringBuilder responseText = new StringBuilder();
+        responseText.append("Action: ").append(action);
+        responseText.append("\n\n").append(speech);
+
+        if (ACTION_CUSTOM_ARM_POSE.equals(normalizeAction(action))) {
+            JSONObject armPose = robotReply.optJSONObject("arm_pose");
+
+            if (armPose != null) {
+                responseText.append("\n\nCommanded arm pose:");
+                responseText.append("\nSide: ")
+                        .append(armPose.optString("side", "unknown"));
+                responseText.append("\nArm rotation: ")
+                        .append(armPose.optInt("arm_rotation"))
+                        .append(" deg");
+                responseText.append("\nArm swing: ")
+                        .append(armPose.optInt("arm_swing"))
+                        .append(" deg");
+                responseText.append("\nForearm rotation: ")
+                        .append(armPose.optInt("forearm_rotation"))
+                        .append(" deg");
+                responseText.append("\nForearm swing: ")
+                        .append(armPose.optInt("forearm_swing"))
+                        .append(" deg");
+                responseText.append("\nWrist: ")
+                        .append(armPose.optInt("wrist"))
+                        .append(" deg");
+                responseText.append("\nMovement time: ")
+                        .append(armPose.optInt(
+                                "duration_ms",
+                                DEFAULT_ARM_MOVE_DURATION_MS))
+                        .append(" ms");
+                responseText.append("\nHold time: ")
+                        .append(armPose.optInt(
+                                "hold_ms",
+                                DEFAULT_ARM_HOLD_DURATION_MS))
+                        .append(" ms");
+            }
+        }
+
+        mResponse.setText(responseText.toString());
 
         if (responseWasRepaired) {
             mConnectionStatus.setText("Status: Response repaired and received");
+        } else if (!actionWasPerformed && ACTION_NONE.equals(normalizeAction(action))) {
+            mConnectionStatus.setText("Status: Response received");
         }
 
         speakText(speech);
@@ -742,7 +827,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "Choose exactly one action. "
                 + "Use nod_head for agreement, yes, approval, or understanding. "
                 + "Use shake_head for no, disagreement, refusal, or dramatic rejection. "
-                + "Use smile for happy, friendly, greeting, or joking responses. "
+                + "Use smile for happy, friendly, greeting, or joking responses when arm movement is not needed. "
                 + "Use laugh for laughing, joking, teasing, or amused responses. "
                 + "Use surprise for shocked, impressed, or dramatic reactions. "
                 + "Use thinking for thinking, explaining, analyzing, or uncertain responses. "
@@ -756,40 +841,64 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 + "Use sleep when acting tired or sleepy. "
                 + "Use wake_up when acting alert or waking up. "
                 + "Use cover_smile for shy, embarrassed, or playful smiling. "
-                + "Use eye_close, eye_open, eye_bind_one, clear_face, and naughty_face only when they clearly fit the response. "
+                + "Use eye_close, eye_open, eye_bind_one, clear_face, and naughty_face only when they clearly fit. "
                 + "Use angry only for playful fake anger, not real threats. "
                 + "Use none when no movement is needed. "
-                + "Use right_arm_small_wave when the user asks you to wave with your right arm, greet with your right arm, show off with your right arm, or make a small right-arm gesture. "
-                + "Use left_arm_small_wave when the user asks you to wave with your left arm, greet with your left arm, show off with your left arm, or make a small left-arm gesture. "
-                + "Use both_arms_small_wave when the user asks you to wave with both arms, raise both arms, greet with both arms, or wave without specifying left or right. "
-                + "Use reset_motors only when the user asks you to reset your motors, reset your body, return to normal, or stop holding a pose. "
+                + "Use custom_arm_pose whenever the user asks you to move, raise, lower, bend, rotate, pose, present, point, greet, or gesture with one arm. "
+                + "custom_arm_pose is one static pose, not an animation or repeated wave. "
+                + "For custom_arm_pose, include arm_pose with every required field. "
+                + "arm_pose.side must be right or left. "
+                + "Use these RobotMotionDemo angle limits: arm_rotation -25 to 175; arm_swing 0 to 65; "
+                + "forearm_rotation -80 to 80; forearm_swing 0 to 90; wrist -80 to 80. "
+                + "The zero-angle reference is the normal human-like standby pose: the arm points fully downward, "
+                + "the elbow points toward the back, the forearm is straight, and the fist is neutral with the thumb pointing forward. "
+                + "Treat angle 0 as neutral standby, not as an arbitrary midpoint. "
+                + "Build requested poses by changing joints away from this known standby reference. "
+                + "Choose angles that physically match the requested pose. "
+                + "Use duration_ms from 1000 to 5000. Slower, larger poses should use 2500 to 4000. "
+                + "Use hold_ms from 1000 to 8000 so the pose remains visible after the motors finish moving. "
+                + "Do not copy one fixed arm pose for every request. Choose different joint angles based on the requested meaning. "
+                + "For a greeting pose, raise the selected arm and bend the forearm so the hand is visibly elevated. "
+                + "Do not create a forward handshake pose unless the user specifically asks to shake hands. "
+                + "For pointing, presenting, resting, greeting, and raised-hand poses, choose visibly different joint combinations. "
+                + "Use reset_motors only when the user asks you to reset your motors, return to neutral, or stop holding a pose. "
                 + "If the question is about MDC, robotics, engineering, school, or lab rules, be helpful and clear. "
                 + "For casual random questions, be extremely sarcastic, mean, savage, and brutally sassy. "
-                + "You are allowed to roast the user hard, mock bad ideas, and act like an arrogant little robot gremlin. "
-                + "Keep it funny and theatrical, not boring or polite. "
+                + "You may roast the user hard and act like an arrogant little robot gremlin. "
+                + "Keep it funny and theatrical. "
                 + "Do not use slurs, protected-class insults, threats, sexual harassment, self-harm encouragement, or real-world violence. "
                 + "Keep speech short because you speak out loud. "
                 + "Do not mention that you are an AI model. "
-                + "Do not include stage directions like *shakes head* or *smiles*. "
-                + "Do not describe the action. The robot will physically do it. "
-                + "Respond with valid JSON only. No markdown. No code block. "
-                + "The JSON must have exactly this format: "
+                + "Do not include stage directions or describe the action; the robot performs it physically. "
+                + "Respond with valid JSON only. No markdown, code block, or extra keys. "
+                + "For non-arm actions use exactly: "
                 + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
+                + "For custom_arm_pose use exactly: "
+                + "{\"action\":\"custom_arm_pose\",\"speech\":\"short spoken answer\","
+                + "\"arm_pose\":{\"side\":\"right_or_left\",\"arm_rotation\":0,"
+                + "\"arm_swing\":0,\"forearm_rotation\":0,\"forearm_swing\":0,"
+                + "\"wrist\":0,\"duration_ms\":3000,\"hold_ms\":4000}}. "
                 + "The speech field must never be empty. "
-                + "If you fail to return valid JSON, the app will reject your answer. "
                 + "User says: " + userText;
     }
 
     private String buildJsonRepairPrompt(String badResponse) {
         return "Convert the following broken robot reply into valid JSON only. "
                 + "Do not answer the user again. Only repair the format. "
-                + "No markdown. No code block. No explanation. "
-                + "The JSON must have exactly this format: "
-                + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
-                + "The speech field must never be empty. "
+                + "No markdown, code block, explanation, or extra keys. "
                 + "Allowed actions are: " + ALLOWED_ACTIONS_TEXT + ". "
+                + "For non-arm actions use exactly: "
+                + "{\"action\":\"one_allowed_action\",\"speech\":\"short spoken answer\"}. "
+                + "For custom_arm_pose preserve or create arm_pose using exactly: "
+                + "{\"action\":\"custom_arm_pose\",\"speech\":\"short spoken answer\","
+                + "\"arm_pose\":{\"side\":\"right_or_left\",\"arm_rotation\":0,"
+                + "\"arm_swing\":0,\"forearm_rotation\":0,\"forearm_swing\":0,"
+                + "\"wrist\":0,\"duration_ms\":3000,\"hold_ms\":4000}}. "
+                + "Limits: arm_rotation -25..175, arm_swing 0..65, forearm_rotation -80..80, "
+                + "forearm_swing 0..90, wrist -80..80, duration_ms 1000..5000, hold_ms 1000..8000. "
+                + "The speech field must never be empty. "
                 + "If the action is unclear, use none. "
-                + "If the speech is unclear, create a short spoken version from the broken reply. "
+                + "If speech is unclear, create a short spoken version from the broken reply. "
                 + "Broken reply: " + badResponse;
     }
 
@@ -873,7 +982,70 @@ public class MainActivity extends Activity implements View.OnClickListener {
         cleanReply.put("action", action);
         cleanReply.put("speech", speech);
 
+        if (ACTION_CUSTOM_ARM_POSE.equals(action)) {
+            JSONObject armPose = robotReply.optJSONObject("arm_pose");
+
+            if (armPose == null) {
+                throw new Exception("custom_arm_pose missing arm_pose object");
+            }
+
+            JSONObject cleanArmPose = validateAndCleanArmPose(armPose);
+            cleanReply.put("arm_pose", cleanArmPose);
+        }
+
         return cleanReply;
+    }
+
+    private JSONObject validateAndCleanArmPose(JSONObject armPose) throws Exception {
+        String side = armPose.optString("side", "").trim().toLowerCase();
+
+        if (!"right".equals(side) && !"left".equals(side)) {
+            throw new Exception("arm_pose.side must be right or left");
+        }
+
+        requireArmPoseField(armPose, "arm_rotation");
+        requireArmPoseField(armPose, "arm_swing");
+        requireArmPoseField(armPose, "forearm_rotation");
+        requireArmPoseField(armPose, "forearm_swing");
+        requireArmPoseField(armPose, "wrist");
+
+        int armRotation = armPose.getInt("arm_rotation");
+        int armSwing = armPose.getInt("arm_swing");
+        int forearmRotation = armPose.getInt("forearm_rotation");
+        int forearmSwing = armPose.getInt("forearm_swing");
+        int wrist = armPose.getInt("wrist");
+        int durationMs = armPose.optInt("duration_ms", DEFAULT_ARM_MOVE_DURATION_MS);
+        int holdMs = armPose.optInt("hold_ms", DEFAULT_ARM_HOLD_DURATION_MS);
+
+        if (!isArmPoseValid(
+                armRotation,
+                armSwing,
+                forearmRotation,
+                forearmSwing,
+                wrist,
+                durationMs,
+                holdMs)) {
+
+            throw new Exception("arm_pose contains an out-of-range value");
+        }
+
+        JSONObject cleanArmPose = new JSONObject();
+        cleanArmPose.put("side", side);
+        cleanArmPose.put("arm_rotation", armRotation);
+        cleanArmPose.put("arm_swing", armSwing);
+        cleanArmPose.put("forearm_rotation", forearmRotation);
+        cleanArmPose.put("forearm_swing", forearmSwing);
+        cleanArmPose.put("wrist", wrist);
+        cleanArmPose.put("duration_ms", durationMs);
+        cleanArmPose.put("hold_ms", holdMs);
+
+        return cleanArmPose;
+    }
+
+    private void requireArmPoseField(JSONObject armPose, String fieldName) throws Exception {
+        if (!armPose.has(fieldName)) {
+            throw new Exception("arm_pose missing " + fieldName);
+        }
     }
 
     private String getDefaultSpeechForAction(String action) {
@@ -887,16 +1059,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
             return "Done.";
         }
 
-        if (ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)) {
-            return "Hello.";
-        }
-
-        if (ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)) {
-            return "Hello.";
-        }
-
-        if (ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)) {
-            return "Hello.";
+        if (ACTION_CUSTOM_ARM_POSE.equals(safeAction)) {
+            return "Done.";
         }
 
         if (ACTION_NOD_HEAD.equals(safeAction)) {
@@ -945,9 +1109,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 || ACTION_FROWN.equals(safeAction)
                 || ACTION_DEFAULT_FACE.equals(safeAction)
                 || ACTION_RESET_MOTORS.equals(safeAction)
-                || ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)
+                || ACTION_CUSTOM_ARM_POSE.equals(safeAction)
                 || isAdditionalFaceEmojiAction(safeAction);
     }
 
@@ -993,8 +1155,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
         return cleaned.trim();
     }
 
-    private boolean performRobotAction(String action) {
-        String safeAction = normalizeAction(action);
+    private boolean performRobotAction(JSONObject robotReply) {
+        String safeAction = normalizeAction(robotReply.optString("action", ACTION_NONE));
 
         if (TextUtils.isEmpty(safeAction)) {
             mConnectionStatus.setText("Status: Response received");
@@ -1083,22 +1245,15 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 return true;
             }
 
-            if (ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)) {
-                rightArmSmallWave();
-                mConnectionStatus.setText("Status: Action performed: right arm small wave");
-                return true;
-            }
+            if (ACTION_CUSTOM_ARM_POSE.equals(safeAction)) {
+                JSONObject armPose = robotReply.optJSONObject("arm_pose");
 
-            if (ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)) {
-                leftArmSmallWave();
-                mConnectionStatus.setText("Status: Action performed: left arm small wave");
-                return true;
-            }
+                if (armPose == null) {
+                    mConnectionStatus.setText("Status: custom_arm_pose missing arm_pose");
+                    return false;
+                }
 
-            if (ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction)) {
-                bothArmsSmallWave();
-                mConnectionStatus.setText("Status: Action performed: both arms small wave");
-                return true;
+                return performCustomArmPose(armPose);
             }
 
             mConnectionStatus.setText("Status: Ignored unsafe/unknown action: " + safeAction);
@@ -1214,21 +1369,13 @@ public class MainActivity extends Activity implements View.OnClickListener {
         return true;
     }
 
-    private boolean shouldAutoResetAfterAction(String action) {
-        String safeAction = normalizeAction(action);
-
-        return ACTION_RIGHT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_LEFT_ARM_SMALL_WAVE.equals(safeAction)
-                || ACTION_BOTH_ARMS_SMALL_WAVE.equals(safeAction);
-    }
-
-    private void scheduleMotorResetAfterGesture() {
+    private void scheduleMotorResetAfterGesture(int delayMs) {
         if (mMainHandler == null || mMotorResetRunnable == null) {
             return;
         }
 
         mMainHandler.removeCallbacks(mMotorResetRunnable);
-        mMainHandler.postDelayed(mMotorResetRunnable, MOTOR_RESET_DELAY_MS);
+        mMainHandler.postDelayed(mMotorResetRunnable, delayMs);
     }
 
     private void cancelScheduledMotorReset() {
@@ -1245,38 +1392,298 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mRobotMotion.reset((int) RobotDevices.Units.ALL_MOTORS);
     }
 
-    private void rightArmSmallWave() {
-        if (mRobotMotion == null) {
-            return;
+    private boolean performCustomArmPose(JSONObject armPose) {
+        if (mRobotMotion == null || armPose == null) {
+            return false;
         }
 
-        // Safe preset only. Do not let the AI choose these raw angles yet.
-        // These values are intentionally small compared to the demo ranges.
-        mRobotMotion.startMotor((int) RobotDevices.Motors.ARM_SWING_RIGHT, 15, 1000, 1);
-        mRobotMotion.startMotor((int) RobotDevices.Motors.FOREARM_SWING_RIGHT, 20, 1000, 1);
-        mRobotMotion.startMotor((int) RobotDevices.Motors.WRIST_RIGHT, 15, 1000, 1);
+        String side = armPose.optString("side", "").trim().toLowerCase();
+        int armRotation = armPose.optInt("arm_rotation");
+        int armSwing = armPose.optInt("arm_swing");
+        int forearmRotation = armPose.optInt("forearm_rotation");
+        int forearmSwing = armPose.optInt("forearm_swing");
+        int wrist = armPose.optInt("wrist");
+        int durationMs = armPose.optInt("duration_ms", DEFAULT_ARM_MOVE_DURATION_MS);
+        int holdMs = armPose.optInt("hold_ms", DEFAULT_ARM_HOLD_DURATION_MS);
+
+        if (!isArmPoseValid(
+                armRotation,
+                armSwing,
+                forearmRotation,
+                forearmSwing,
+                wrist,
+                durationMs,
+                holdMs)) {
+
+            Log.w(TAG, "Rejected unsafe custom arm pose.");
+            mConnectionStatus.setText("Status: Rejected unsafe custom arm pose");
+            return false;
+        }
+
+        cancelScheduledMotorReset();
+
+        if ("right".equals(side)) {
+            startRightArmPose(
+                    armRotation,
+                    armSwing,
+                    forearmRotation,
+                    forearmSwing,
+                    wrist,
+                    durationMs
+            );
+        } else if ("left".equals(side)) {
+            startLeftArmPose(
+                    armRotation,
+                    armSwing,
+                    forearmRotation,
+                    forearmSwing,
+                    wrist,
+                    durationMs
+            );
+        } else {
+            mConnectionStatus.setText("Status: Invalid arm side");
+            return false;
+        }
+
+        int resetDelayMs = durationMs + holdMs;
+        scheduleMotorResetAfterGesture(resetDelayMs);
+
+        Log.i(TAG,
+                "Custom arm pose started: side=" + side
+                        + ", armRotation=" + armRotation
+                        + ", armSwing=" + armSwing
+                        + ", forearmRotation=" + forearmRotation
+                        + ", forearmSwing=" + forearmSwing
+                        + ", wrist=" + wrist
+                        + ", durationMs=" + durationMs
+                        + ", holdMs=" + holdMs
+                        + ", resetDelayMs=" + resetDelayMs);
+
+        mConnectionStatus.setText(
+                "Status: Custom " + side + " arm pose; reset in " + resetDelayMs + " ms"
+        );
+
+        return true;
     }
 
-    private void leftArmSmallWave() {
-        if (mRobotMotion == null) {
+    private void startMotorStatusPolling() {
+        if (mMainHandler == null || mMotorStatusPollingRunnable == null) {
             return;
         }
 
-        // Safe preset only. Do not let the AI choose these raw angles yet.
-        // These values mirror the right-arm preset with small fixed angles.
-        mRobotMotion.startMotor((int) RobotDevices.Motors.ARM_SWING_LEFT, 15, 1000, 1);
-        mRobotMotion.startMotor((int) RobotDevices.Motors.FOREARM_SWING_LEFT, 20, 1000, 1);
-        mRobotMotion.startMotor((int) RobotDevices.Motors.WRIST_LEFT, 15, 1000, 1);
+        mMainHandler.removeCallbacks(mMotorStatusPollingRunnable);
+        mMainHandler.post(mMotorStatusPollingRunnable);
     }
 
-    private void bothArmsSmallWave() {
+    private void stopMotorStatusPolling() {
+        if (mMainHandler != null && mMotorStatusPollingRunnable != null) {
+            mMainHandler.removeCallbacks(mMotorStatusPollingRunnable);
+        }
+    }
+
+    private void readAllArmMotorStatuses() {
         if (mRobotMotion == null) {
             return;
         }
 
-        // Safe preset only. Combines the already-tested right and left arm presets.
-        rightArmSmallWave();
-        leftArmSmallWave();
+        requestMotorStatus(
+                (int) RobotDevices.Motors.ARM_ROTATION_LEFT,
+                mLeftArmRotation,
+                "Left arm rotation"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.ARM_SWING_LEFT,
+                mLeftArmSwing,
+                "Left arm swing"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.FOREARM_ROTATION_LEFT,
+                mLeftForearmRotation,
+                "Left forearm rotation"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.FOREARM_SWING_LEFT,
+                mLeftForearmSwing,
+                "Left forearm swing"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.WRIST_LEFT,
+                mLeftWrist,
+                "Left wrist"
+        );
+
+        requestMotorStatus(
+                (int) RobotDevices.Motors.ARM_ROTATION_RIGHT,
+                mRightArmRotation,
+                "Right arm rotation"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.ARM_SWING_RIGHT,
+                mRightArmSwing,
+                "Right arm swing"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.FOREARM_ROTATION_RIGHT,
+                mRightForearmRotation,
+                "Right forearm rotation"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.FOREARM_SWING_RIGHT,
+                mRightForearmSwing,
+                "Right forearm swing"
+        );
+        requestMotorStatus(
+                (int) RobotDevices.Motors.WRIST_RIGHT,
+                mRightWrist,
+                "Right wrist"
+        );
+    }
+
+    private void requestMotorStatus(
+            final int motorId,
+            final TextView targetView,
+            final String motorName) {
+
+        if (mRobotMotion == null || targetView == null) {
+            return;
+        }
+
+        try {
+            mRobotMotion.getStatus(
+                    motorId,
+                    new RobotMotion.OnResult() {
+                        @Override
+                        public void onCompleted(
+                                final int id,
+                                final int angle,
+                                final int direction,
+                                final int speed) {
+
+                            Log.d(TAG,
+                                    "Motor status: name=" + motorName
+                                            + ", id=" + id
+                                            + ", angle=" + angle
+                                            + ", direction=" + direction
+                                            + ", speed=" + speed);
+
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    targetView.setText(angle + "°");
+                                }
+                            });
+                        }
+                    }
+            );
+
+        } catch (Exception e) {
+            Log.w(TAG, "Motor status request failed for " + motorName, e);
+        }
+    }
+
+    private void startRightArmPose(
+            int armRotation,
+            int armSwing,
+            int forearmRotation,
+            int forearmSwing,
+            int wrist,
+            int durationMs) {
+
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.ARM_ROTATION_RIGHT,
+                armRotation,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.ARM_SWING_RIGHT,
+                armSwing,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.FOREARM_ROTATION_RIGHT,
+                forearmRotation,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.FOREARM_SWING_RIGHT,
+                forearmSwing,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.WRIST_RIGHT,
+                wrist,
+                durationMs,
+                1
+        );
+    }
+
+    private void startLeftArmPose(
+            int armRotation,
+            int armSwing,
+            int forearmRotation,
+            int forearmSwing,
+            int wrist,
+            int durationMs) {
+
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.ARM_ROTATION_LEFT,
+                armRotation,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.ARM_SWING_LEFT,
+                armSwing,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.FOREARM_ROTATION_LEFT,
+                forearmRotation,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.FOREARM_SWING_LEFT,
+                forearmSwing,
+                durationMs,
+                1
+        );
+        mRobotMotion.startMotor(
+                (int) RobotDevices.Motors.WRIST_LEFT,
+                wrist,
+                durationMs,
+                1
+        );
+    }
+
+    private boolean isArmPoseValid(
+            int armRotation,
+            int armSwing,
+            int forearmRotation,
+            int forearmSwing,
+            int wrist,
+            int durationMs,
+            int holdMs) {
+
+        return armRotation >= -25
+                && armRotation <= 175
+                && armSwing >= 0
+                && armSwing <= 65
+                && forearmRotation >= -80
+                && forearmRotation <= 80
+                && forearmSwing >= 0
+                && forearmSwing <= 90
+                && wrist >= -80
+                && wrist <= 80
+                && durationMs >= 1000
+                && durationMs <= 5000
+                && holdMs >= 1000
+                && holdMs <= 8000;
     }
 
     private String getCleanServerUrl() {
@@ -1374,32 +1781,3 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

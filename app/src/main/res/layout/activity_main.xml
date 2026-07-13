@@ -12,13 +12,12 @@
         android:layout_height="match_parent"
         android:orientation="horizontal">
 
-        <!-- LEFT SIDE: SETTINGS + PROMPT -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:padding="20dp">
 
             <TextView
                 android:layout_width="match_parent"
@@ -27,34 +26,41 @@
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
-            <EditText
-                android:id="@+id/et_server_url"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="http://192.168.2.36:11434"
-                android:singleLine="true"
-                android:text="http://192.168.2.36:11434" />
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/et_server_url"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="http://192.168.2.36:11434"
+                    android:singleLine="true"
+                    android:text="http://192.168.2.36:11434" />
+
+                <Button
+                    android:id="@+id/btn_test_connection"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="8dp"
+                    android:text="Test Connection" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tv_connection_status"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="6dp"
                 android:text="Status: Ready"
                 android:textSize="14sp" />
-
-            <Button
-                android:id="@+id/btn_test_connection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="Test Connection" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
+                android:layout_marginTop="16dp"
                 android:text="Prompt"
                 android:textSize="18sp"
                 android:textStyle="bold" />
@@ -62,26 +68,188 @@
             <EditText
                 android:id="@+id/et_prompt"
                 android:layout_width="match_parent"
-                android:layout_height="120dp"
+                android:layout_height="96dp"
                 android:layout_marginTop="8dp"
                 android:gravity="top"
                 android:hint="Ask iPal something..."
                 android:inputType="textMultiLine"
                 android:text="What are you?" />
 
-            <Button
-                android:id="@+id/btn_ask_ipal"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="Ask iPal" />
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/btn_clear"
+                <Button
+                    android:id="@+id/btn_ask_ipal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Ask iPal" />
+
+                <Button
+                    android:id="@+id/btn_clear"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="8dp"
+                    android:layout_weight="1"
+                    android:text="Clear" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Motor Positions"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Clear" />
+                android:text="Left arm"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:weightSum="5">
+
+                <TextView
+                    android:id="@+id/tv_left_arm_rotation"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_left_arm_swing"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_left_forearm_rotation"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_left_forearm_swing"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_left_wrist"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Right arm"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:weightSum="5">
+
+                <TextView
+                    android:id="@+id/tv_right_arm_rotation"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_right_arm_swing"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_right_forearm_rotation"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_right_forearm_swing"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_right_wrist"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="#EEEEEE"
+                    android:gravity="center"
+                    android:text="--°"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="AR   AS   FR   FS   W"
+                android:textSize="12sp"
+                android:gravity="center" />
 
         </LinearLayout>
 
@@ -90,13 +258,12 @@
             android:layout_height="match_parent"
             android:background="#000000" />
 
-        <!-- RIGHT SIDE: RESPONSE + SPEAK -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:padding="20dp">
 
             <TextView
                 android:layout_width="match_parent"
