@@ -129,6 +129,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private SpeechManager mSpeechManager;
     private RobotMotion mRobotMotion = new RobotMotion();
     private RobotSystem mRobotSystem;
+    private VisionEventBridge mVisionEventBridge;
 
     private Handler mMainHandler;
     private Runnable mMotorResetRunnable;
@@ -183,9 +184,34 @@ public class MainActivity extends Activity implements View.OnClickListener {
         initView();
         initListener();
     }
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (mVisionEventBridge == null) {
+            initVisionEventBridge();
+        } else {
+            mVisionEventBridge.resume();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (mVisionEventBridge != null) {
+            mVisionEventBridge.pause();
+        }
+
+        super.onPause();
+    }
+
 
     @Override
     protected void onDestroy() {
+        if (mVisionEventBridge != null) {
+            mVisionEventBridge.destroy();
+            mVisionEventBridge = null;
+        }
+
         super.onDestroy();
 
         mCurrentOllamaRequestToken++;
@@ -215,6 +241,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         };
 
         registerRobotSystemListener();
+        initVisionEventBridge();
     }
 
     private void initView() {
@@ -281,6 +308,16 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 
+
+    private void initVisionEventBridge() {
+        if (mVisionEventBridge != null) {
+            return;
+        }
+
+        mVisionEventBridge = new VisionEventBridge(this);
+        mVisionEventBridge.start();
+        Log.i(TAG, "VisionEventBridge initialized.");
+    }
     private void registerRobotSystemListener() {
         try {
             mRobotSystem = new RobotSystem();
@@ -1337,6 +1374,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 }
+
+
+
+
+
 
 
 
