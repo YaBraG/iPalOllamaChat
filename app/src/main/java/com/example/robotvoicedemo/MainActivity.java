@@ -139,12 +139,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private RobotMotion mRobotMotion = new RobotMotion();
     private RobotSystem mRobotSystem;
     private VisionEventBridge mVisionEventBridge;
+    private MotorStatusController mMotorStatusController;
 
     private Handler mMainHandler;
     private Runnable mMotorResetRunnable;
-    private Runnable mMotorStatusPollingRunnable;
-
-    private static final int MOTOR_STATUS_POLL_INTERVAL_MS = 1000;
 
     private String mLastResponse = "";
     private long mLastTouchReactionTimeMs = 0;
@@ -182,6 +180,19 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     };
 
+    private final MotorStatusController.Callback mMotorStatusCallback =
+            new MotorStatusController.Callback() {
+                @Override
+                public void onMotorStatusUpdated(
+                        int motorId,
+                        int angle,
+                        int direction,
+                        int speed) {
+
+                    updateMotorStatusText(motorId, angle);
+                }
+            };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -206,12 +217,16 @@ public class MainActivity extends Activity implements View.OnClickListener {
             mVisionEventBridge.resume();
         }
 
-        startMotorStatusPolling();
+        if (mMotorStatusController != null) {
+            mMotorStatusController.start();
+        }
     }
 
     @Override
     protected void onPause() {
-        stopMotorStatusPolling();
+        if (mMotorStatusController != null) {
+            mMotorStatusController.stop();
+        }
 
         if (mVisionEventBridge != null) {
             mVisionEventBridge.pause();
@@ -237,8 +252,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
             mMainHandler.removeCallbacks(mMotorResetRunnable);
         }
 
-        if (mMainHandler != null && mMotorStatusPollingRunnable != null) {
-            mMainHandler.removeCallbacks(mMotorStatusPollingRunnable);
+        if (mMotorStatusController != null) {
+            mMotorStatusController.destroy();
+            mMotorStatusController = null;
         }
 
         if (mSpeechManager != null) {
@@ -260,16 +276,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
             }
         };
 
-        mMotorStatusPollingRunnable = new Runnable() {
-            @Override
-            public void run() {
-                readAllArmMotorStatuses();
-
-                if (mMainHandler != null) {
-                    mMainHandler.postDelayed(this, MOTOR_STATUS_POLL_INTERVAL_MS);
-                }
-            }
-        };
+        mMotorStatusController = new MotorStatusController(mRobotMotion, mMotorStatusCallback);
 
         registerRobotSystemListener();
         initVisionEventBridge();
@@ -1466,118 +1473,33 @@ public class MainActivity extends Activity implements View.OnClickListener {
         return true;
     }
 
-    private void startMotorStatusPolling() {
-        if (mMainHandler == null || mMotorStatusPollingRunnable == null) {
-            return;
+    private void updateMotorStatusText(int motorId, int angle) {
+        TextView targetView = null;
+
+        if (motorId == (int) RobotDevices.Motors.ARM_ROTATION_LEFT) {
+            targetView = mLeftArmRotation;
+        } else if (motorId == (int) RobotDevices.Motors.ARM_SWING_LEFT) {
+            targetView = mLeftArmSwing;
+        } else if (motorId == (int) RobotDevices.Motors.FOREARM_ROTATION_LEFT) {
+            targetView = mLeftForearmRotation;
+        } else if (motorId == (int) RobotDevices.Motors.FOREARM_SWING_LEFT) {
+            targetView = mLeftForearmSwing;
+        } else if (motorId == (int) RobotDevices.Motors.WRIST_LEFT) {
+            targetView = mLeftWrist;
+        } else if (motorId == (int) RobotDevices.Motors.ARM_ROTATION_RIGHT) {
+            targetView = mRightArmRotation;
+        } else if (motorId == (int) RobotDevices.Motors.ARM_SWING_RIGHT) {
+            targetView = mRightArmSwing;
+        } else if (motorId == (int) RobotDevices.Motors.FOREARM_ROTATION_RIGHT) {
+            targetView = mRightForearmRotation;
+        } else if (motorId == (int) RobotDevices.Motors.FOREARM_SWING_RIGHT) {
+            targetView = mRightForearmSwing;
+        } else if (motorId == (int) RobotDevices.Motors.WRIST_RIGHT) {
+            targetView = mRightWrist;
         }
 
-        mMainHandler.removeCallbacks(mMotorStatusPollingRunnable);
-        mMainHandler.post(mMotorStatusPollingRunnable);
-    }
-
-    private void stopMotorStatusPolling() {
-        if (mMainHandler != null && mMotorStatusPollingRunnable != null) {
-            mMainHandler.removeCallbacks(mMotorStatusPollingRunnable);
-        }
-    }
-
-    private void readAllArmMotorStatuses() {
-        if (mRobotMotion == null) {
-            return;
-        }
-
-        requestMotorStatus(
-                (int) RobotDevices.Motors.ARM_ROTATION_LEFT,
-                mLeftArmRotation,
-                "Left arm rotation"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.ARM_SWING_LEFT,
-                mLeftArmSwing,
-                "Left arm swing"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.FOREARM_ROTATION_LEFT,
-                mLeftForearmRotation,
-                "Left forearm rotation"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.FOREARM_SWING_LEFT,
-                mLeftForearmSwing,
-                "Left forearm swing"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.WRIST_LEFT,
-                mLeftWrist,
-                "Left wrist"
-        );
-
-        requestMotorStatus(
-                (int) RobotDevices.Motors.ARM_ROTATION_RIGHT,
-                mRightArmRotation,
-                "Right arm rotation"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.ARM_SWING_RIGHT,
-                mRightArmSwing,
-                "Right arm swing"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.FOREARM_ROTATION_RIGHT,
-                mRightForearmRotation,
-                "Right forearm rotation"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.FOREARM_SWING_RIGHT,
-                mRightForearmSwing,
-                "Right forearm swing"
-        );
-        requestMotorStatus(
-                (int) RobotDevices.Motors.WRIST_RIGHT,
-                mRightWrist,
-                "Right wrist"
-        );
-    }
-
-    private void requestMotorStatus(
-            final int motorId,
-            final TextView targetView,
-            final String motorName) {
-
-        if (mRobotMotion == null || targetView == null) {
-            return;
-        }
-
-        try {
-            mRobotMotion.getStatus(
-                    motorId,
-                    new RobotMotion.OnResult() {
-                        @Override
-                        public void onCompleted(
-                                final int id,
-                                final int angle,
-                                final int direction,
-                                final int speed) {
-
-                            Log.d(TAG,
-                                    "Motor status: name=" + motorName
-                                            + ", id=" + id
-                                            + ", angle=" + angle
-                                            + ", direction=" + direction
-                                            + ", speed=" + speed);
-
-                            runOnUiThread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    targetView.setText(angle + "°");
-                                }
-                            });
-                        }
-                    }
-            );
-
-        } catch (Exception e) {
-            Log.w(TAG, "Motor status request failed for " + motorName, e);
+        if (targetView != null) {
+            targetView.setText(angle + "°");
         }
     }
 
