@@ -6,8 +6,6 @@ import android.content.SharedPreferences;
 import android.robot.hw.RobotDevices;
 import android.robot.hw.RobotSystem;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.robot.motion.RobotMotion;
 import android.robot.speech.SpeechManager;
 import android.robot.speech.SpeechManager.TtsListener;
@@ -39,8 +37,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String PREFS_NAME = "iPalOllamaChatPrefs";
     private static final String PREF_SERVER_URL = "server_url";
 
-    private static final int DEFAULT_ARM_MOVE_DURATION_MS = 2500;
-    private static final int DEFAULT_ARM_HOLD_DURATION_MS = 4000;
     private static final long TOUCH_REACTION_COOLDOWN_MS = 2500;
 
     private static final String ACTION_NONE = "none";
@@ -140,9 +136,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private RobotSystem mRobotSystem;
     private VisionEventBridge mVisionEventBridge;
     private MotorStatusController mMotorStatusController;
-
-    private Handler mMainHandler;
-    private Runnable mMotorResetRunnable;
+    private ArmPoseController mArmPoseController;
 
     private String mLastResponse = "";
     private long mLastTouchReactionTimeMs = 0;
@@ -190,6 +184,16 @@ public class MainActivity extends Activity implements View.OnClickListener {
                         int speed) {
 
                     updateMotorStatusText(motorId, angle);
+                }
+            };
+
+    private final ArmPoseController.Callback mArmPoseCallback =
+            new ArmPoseController.Callback() {
+                @Override
+                public void onArmPoseStatusChanged(String statusText) {
+                    if (mConnectionStatus != null) {
+                        mConnectionStatus.setText(statusText);
+                    }
                 }
             };
 
@@ -248,8 +252,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mCurrentOllamaRequestToken++;
         mWaitingForOllama = false;
 
-        if (mMainHandler != null && mMotorResetRunnable != null) {
-            mMainHandler.removeCallbacks(mMotorResetRunnable);
+        if (mArmPoseController != null) {
+            mArmPoseController.destroy();
+            mArmPoseController = null;
         }
 
         if (mMotorStatusController != null) {
@@ -267,15 +272,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mInputMethodManager = (InputMethodManager) getApplicationContext()
                 .getSystemService(Context.INPUT_METHOD_SERVICE);
 
-        mMainHandler = new Handler(Looper.getMainLooper());
-        mMotorResetRunnable = new Runnable() {
-            @Override
-            public void run() {
-                resetAllMotors();
-                mConnectionStatus.setText("Status: Motors auto-reset after gesture");
-            }
-        };
-
+        mArmPoseController = new ArmPoseController(mRobotMotion, mArmPoseCallback);
         mMotorStatusController = new MotorStatusController(mRobotMotion, mMotorStatusCallback);
 
         registerRobotSystemListener();
@@ -806,12 +803,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 responseText.append("\nMovement time: ")
                         .append(armPose.optInt(
                                 "duration_ms",
-                                DEFAULT_ARM_MOVE_DURATION_MS))
+                                ArmPoseController.DEFAULT_ARM_MOVE_DURATION_MS))
                         .append(" ms");
                 responseText.append("\nHold time: ")
                         .append(armPose.optInt(
                                 "hold_ms",
-                                DEFAULT_ARM_HOLD_DURATION_MS))
+                                ArmPoseController.DEFAULT_ARM_HOLD_DURATION_MS))
                         .append(" ms");
             }
         }
@@ -1021,10 +1018,14 @@ public class MainActivity extends Activity implements View.OnClickListener {
         int forearmRotation = armPose.getInt("forearm_rotation");
         int forearmSwing = armPose.getInt("forearm_swing");
         int wrist = armPose.getInt("wrist");
-        int durationMs = armPose.optInt("duration_ms", DEFAULT_ARM_MOVE_DURATION_MS);
-        int holdMs = armPose.optInt("hold_ms", DEFAULT_ARM_HOLD_DURATION_MS);
+        int durationMs = armPose.optInt(
+                "duration_ms",
+                ArmPoseController.DEFAULT_ARM_MOVE_DURATION_MS);
+        int holdMs = armPose.optInt(
+                "hold_ms",
+                ArmPoseController.DEFAULT_ARM_HOLD_DURATION_MS);
 
-        if (!isArmPoseValid(
+        if (!ArmPoseController.isArmPoseValid(
                 armRotation,
                 armSwing,
                 forearmRotation,
@@ -1246,8 +1247,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
             }
 
             if (ACTION_RESET_MOTORS.equals(safeAction)) {
-                cancelScheduledMotorReset();
-                resetAllMotors();
+                mArmPoseController.cancelScheduledReset();
+                mArmPoseController.resetAllMotors();
                 mConnectionStatus.setText("Status: Action performed: reset motors");
                 return true;
             }
@@ -1260,7 +1261,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                     return false;
                 }
 
-                return performCustomArmPose(armPose);
+                return mArmPoseController.performCustomArmPose(armPose);
             }
 
             mConnectionStatus.setText("Status: Ignored unsafe/unknown action: " + safeAction);
@@ -1376,103 +1377,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         return true;
     }
 
-    private void scheduleMotorResetAfterGesture(int delayMs) {
-        if (mMainHandler == null || mMotorResetRunnable == null) {
-            return;
-        }
-
-        mMainHandler.removeCallbacks(mMotorResetRunnable);
-        mMainHandler.postDelayed(mMotorResetRunnable, delayMs);
-    }
-
-    private void cancelScheduledMotorReset() {
-        if (mMainHandler != null && mMotorResetRunnable != null) {
-            mMainHandler.removeCallbacks(mMotorResetRunnable);
-        }
-    }
-
-    private void resetAllMotors() {
-        if (mRobotMotion == null) {
-            return;
-        }
-
-        mRobotMotion.reset((int) RobotDevices.Units.ALL_MOTORS);
-    }
-
-    private boolean performCustomArmPose(JSONObject armPose) {
-        if (mRobotMotion == null || armPose == null) {
-            return false;
-        }
-
-        String side = armPose.optString("side", "").trim().toLowerCase();
-        int armRotation = armPose.optInt("arm_rotation");
-        int armSwing = armPose.optInt("arm_swing");
-        int forearmRotation = armPose.optInt("forearm_rotation");
-        int forearmSwing = armPose.optInt("forearm_swing");
-        int wrist = armPose.optInt("wrist");
-        int durationMs = armPose.optInt("duration_ms", DEFAULT_ARM_MOVE_DURATION_MS);
-        int holdMs = armPose.optInt("hold_ms", DEFAULT_ARM_HOLD_DURATION_MS);
-
-        if (!isArmPoseValid(
-                armRotation,
-                armSwing,
-                forearmRotation,
-                forearmSwing,
-                wrist,
-                durationMs,
-                holdMs)) {
-
-            Log.w(TAG, "Rejected unsafe custom arm pose.");
-            mConnectionStatus.setText("Status: Rejected unsafe custom arm pose");
-            return false;
-        }
-
-        cancelScheduledMotorReset();
-
-        if ("right".equals(side)) {
-            startRightArmPose(
-                    armRotation,
-                    armSwing,
-                    forearmRotation,
-                    forearmSwing,
-                    wrist,
-                    durationMs
-            );
-        } else if ("left".equals(side)) {
-            startLeftArmPose(
-                    armRotation,
-                    armSwing,
-                    forearmRotation,
-                    forearmSwing,
-                    wrist,
-                    durationMs
-            );
-        } else {
-            mConnectionStatus.setText("Status: Invalid arm side");
-            return false;
-        }
-
-        int resetDelayMs = durationMs + holdMs;
-        scheduleMotorResetAfterGesture(resetDelayMs);
-
-        Log.i(TAG,
-                "Custom arm pose started: side=" + side
-                        + ", armRotation=" + armRotation
-                        + ", armSwing=" + armSwing
-                        + ", forearmRotation=" + forearmRotation
-                        + ", forearmSwing=" + forearmSwing
-                        + ", wrist=" + wrist
-                        + ", durationMs=" + durationMs
-                        + ", holdMs=" + holdMs
-                        + ", resetDelayMs=" + resetDelayMs);
-
-        mConnectionStatus.setText(
-                "Status: Custom " + side + " arm pose; reset in " + resetDelayMs + " ms"
-        );
-
-        return true;
-    }
-
     private void updateMotorStatusText(int motorId, int angle) {
         TextView targetView = null;
 
@@ -1501,111 +1405,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         if (targetView != null) {
             targetView.setText(angle + "°");
         }
-    }
-
-    private void startRightArmPose(
-            int armRotation,
-            int armSwing,
-            int forearmRotation,
-            int forearmSwing,
-            int wrist,
-            int durationMs) {
-
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.ARM_ROTATION_RIGHT,
-                armRotation,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.ARM_SWING_RIGHT,
-                armSwing,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.FOREARM_ROTATION_RIGHT,
-                forearmRotation,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.FOREARM_SWING_RIGHT,
-                forearmSwing,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.WRIST_RIGHT,
-                wrist,
-                durationMs,
-                1
-        );
-    }
-
-    private void startLeftArmPose(
-            int armRotation,
-            int armSwing,
-            int forearmRotation,
-            int forearmSwing,
-            int wrist,
-            int durationMs) {
-
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.ARM_ROTATION_LEFT,
-                armRotation,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.ARM_SWING_LEFT,
-                armSwing,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.FOREARM_ROTATION_LEFT,
-                forearmRotation,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.FOREARM_SWING_LEFT,
-                forearmSwing,
-                durationMs,
-                1
-        );
-        mRobotMotion.startMotor(
-                (int) RobotDevices.Motors.WRIST_LEFT,
-                wrist,
-                durationMs,
-                1
-        );
-    }
-
-    private boolean isArmPoseValid(
-            int armRotation,
-            int armSwing,
-            int forearmRotation,
-            int forearmSwing,
-            int wrist,
-            int durationMs,
-            int holdMs) {
-
-        return armRotation >= -25
-                && armRotation <= 175
-                && armSwing >= 0
-                && armSwing <= 65
-                && forearmRotation >= -80
-                && forearmRotation <= 80
-                && forearmSwing >= 0
-                && forearmSwing <= 90
-                && wrist >= -80
-                && wrist <= 80
-                && durationMs >= 1000
-                && durationMs <= 5000
-                && holdMs >= 1000
-                && holdMs <= 8000;
     }
 
     private String getCleanServerUrl() {
