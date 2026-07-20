@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.robot.hw.RobotDevices;
 import android.robot.hw.RobotSystem;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.robot.motion.RobotMotion;
 import android.robot.speech.SpeechManager;
 import android.robot.speech.SpeechManager.TtsListener;
@@ -38,6 +40,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final String PREF_SERVER_URL = "server_url";
 
     private static final long TOUCH_REACTION_COOLDOWN_MS = 2500;
+    private static final int POST_TTS_FACE_REPLAY_DELAY_MS = 250;
 
     private static final String ACTION_NONE = "none";
     private static final String ACTION_NOD_HEAD = "nod_head";
@@ -140,11 +143,14 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private RobotReplyParser mRobotReplyParser;
 
     private String mLastResponse = "";
+    private String mResponseFaceAction = "";
     private long mLastTouchReactionTimeMs = 0;
 
     private int mLastTtsRequestId = -1;
     private int mCurrentOllamaRequestToken = 0;
     private boolean mWaitingForOllama = false;
+    private Handler mPostTtsFaceReplayHandler;
+    private Runnable mPostTtsFaceReplayRunnable;
 
     private TtsListener mTtsListener = new TtsListener() {
         @Override
@@ -158,6 +164,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
             if (requestId == mLastTtsRequestId) {
                 mLastTtsRequestId = -1;
+                schedulePostTtsFaceReplay();
             }
         }
 
@@ -261,6 +268,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     @Override
     protected void onDestroy() {
+        cancelPendingPostTtsFaceReplay();
+        mResponseFaceAction = "";
+        mPostTtsFaceReplayRunnable = null;
+        mPostTtsFaceReplayHandler = null;
+
         if (mVisionEventBridge != null) {
             mVisionEventBridge.destroy();
             mVisionEventBridge = null;
@@ -290,6 +302,13 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mSpeechManager = (SpeechManager) getSystemService(SpeechService.SERVICE_NAME);
         mInputMethodManager = (InputMethodManager) getApplicationContext()
                 .getSystemService(Context.INPUT_METHOD_SERVICE);
+        mPostTtsFaceReplayHandler = new Handler(Looper.getMainLooper());
+        mPostTtsFaceReplayRunnable = new Runnable() {
+            @Override
+            public void run() {
+                replayResponseFaceAction();
+            }
+        };
 
         mRobotReplyParser = new RobotReplyParser(mRobotReplyActionPolicy);
         mArmPoseController = new ArmPoseController(mRobotMotion, mArmPoseCallback);
@@ -685,6 +704,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
             return;
         }
 
+        cancelPendingPostTtsFaceReplay();
+        mResponseFaceAction = "";
+
         mCurrentOllamaRequestToken++;
         mWaitingForOllama = true;
         final int requestToken = mCurrentOllamaRequestToken;
@@ -785,10 +807,13 @@ public class MainActivity extends Activity implements View.OnClickListener {
     }
     private void handleRobotReplyOnUi(JSONObject robotReply, boolean responseWasRepaired) {
         String action = robotReply.optString("action", ACTION_NONE).trim();
+        String normalizedAction = normalizeAction(action);
         String speech = robotReply.optString(
                 "speech",
                 "I got confused. Very impressive, honestly."
         ).trim();
+
+        mResponseFaceAction = isFaceEmojiAction(normalizedAction) ? normalizedAction : "";
 
         boolean actionWasPerformed = performRobotAction(robotReply);
 
@@ -1176,6 +1201,121 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 || ACTION_WAKE_UP.equals(safeAction);
     }
 
+    private boolean isFaceEmojiAction(String safeAction) {
+        return ACTION_SMILE.equals(safeAction)
+                || ACTION_SAD.equals(safeAction)
+                || ACTION_CRY.equals(safeAction)
+                || ACTION_SHY.equals(safeAction)
+                || ACTION_ANGRY.equals(safeAction)
+                || ACTION_BLINK.equals(safeAction)
+                || ACTION_FROWN.equals(safeAction)
+                || ACTION_DEFAULT_FACE.equals(safeAction)
+                || ACTION_CLEAR_FACE.equals(safeAction)
+                || ACTION_COVER_SMILE.equals(safeAction)
+                || ACTION_DOUBT.equals(safeAction)
+                || ACTION_EYE_BIND_ONE.equals(safeAction)
+                || ACTION_EYE_CLOSE.equals(safeAction)
+                || ACTION_EYE_OPEN.equals(safeAction)
+                || ACTION_GRIMACE.equals(safeAction)
+                || ACTION_HEARTED.equals(safeAction)
+                || ACTION_INDIFFERENT.equals(safeAction)
+                || ACTION_LAUGH.equals(safeAction)
+                || ACTION_LISTEN.equals(safeAction)
+                || ACTION_NAUGHTY_FACE.equals(safeAction)
+                || ACTION_SHH.equals(safeAction)
+                || ACTION_SLEEP.equals(safeAction)
+                || ACTION_SURPRISE.equals(safeAction)
+                || ACTION_TALK.equals(safeAction)
+                || ACTION_THINKING.equals(safeAction)
+                || ACTION_WAKE_UP.equals(safeAction);
+    }
+
+    private void schedulePostTtsFaceReplay() {
+        cancelPendingPostTtsFaceReplay();
+
+        if (TextUtils.isEmpty(mResponseFaceAction)
+                || mPostTtsFaceReplayHandler == null
+                || mPostTtsFaceReplayRunnable == null) {
+            return;
+        }
+
+        mPostTtsFaceReplayHandler.postDelayed(
+                mPostTtsFaceReplayRunnable,
+                POST_TTS_FACE_REPLAY_DELAY_MS);
+    }
+
+    private void cancelPendingPostTtsFaceReplay() {
+        if (mPostTtsFaceReplayHandler != null && mPostTtsFaceReplayRunnable != null) {
+            mPostTtsFaceReplayHandler.removeCallbacks(mPostTtsFaceReplayRunnable);
+        }
+    }
+
+    private void replayResponseFaceAction() {
+        String safeAction = mResponseFaceAction;
+
+        if (mRobotMotion == null || !isFaceEmojiAction(safeAction)) {
+            return;
+        }
+
+        try {
+            if (ACTION_SMILE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SMILE);
+            } else if (ACTION_SAD.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SAD);
+            } else if (ACTION_CRY.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.CRY);
+            } else if (ACTION_SHY.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SHY);
+            } else if (ACTION_ANGRY.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.ANGRY);
+            } else if (ACTION_BLINK.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.BLINK);
+            } else if (ACTION_FROWN.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.FROWN);
+            } else if (ACTION_DEFAULT_FACE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.DEFAULT);
+            } else if (ACTION_CLEAR_FACE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.CLEAR);
+            } else if (ACTION_COVER_SMILE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.COVER_SMILE);
+            } else if (ACTION_DOUBT.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.DOUBT);
+            } else if (ACTION_EYE_BIND_ONE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.EYEBINDONE);
+            } else if (ACTION_EYE_CLOSE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.EYECLOSE);
+            } else if (ACTION_EYE_OPEN.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.EYEOPEN);
+            } else if (ACTION_GRIMACE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.GRIMACE);
+            } else if (ACTION_HEARTED.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.HEARTED);
+            } else if (ACTION_INDIFFERENT.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.INDIFFERENT);
+            } else if (ACTION_LAUGH.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.LAUGH);
+            } else if (ACTION_LISTEN.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.LISTEN);
+            } else if (ACTION_NAUGHTY_FACE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.NAUGHTY);
+            } else if (ACTION_SHH.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SHH);
+            } else if (ACTION_SLEEP.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SLEEP);
+            } else if (ACTION_SURPRISE.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.SURPRISE);
+            } else if (ACTION_TALK.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.TALK);
+            } else if (ACTION_THINKING.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.THINKING);
+            } else if (ACTION_WAKE_UP.equals(safeAction)) {
+                mRobotMotion.emoji(RobotMotion.Emoji.WAKE_UP);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Post-TTS face replay failed", e);
+        }
+    }
+
     private boolean performAdditionalFaceEmojiAction(String safeAction) {
         if (ACTION_CLEAR_FACE.equals(safeAction)) {
             return playEmoji(RobotMotion.Emoji.CLEAR, "clear face");
@@ -1363,6 +1503,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
 
         if (!TextUtils.isEmpty(text)) {
+            cancelPendingPostTtsFaceReplay();
             enableRobotTts();
             mLastTtsRequestId = mSpeechManager.startSpeaking(text);
             mTtsStatus.setText("TTS Status: Speaking request sent, requestId: " + mLastTtsRequestId);
